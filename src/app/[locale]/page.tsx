@@ -2,23 +2,25 @@
 import { getTranslations } from "next-intl/server";
 import prisma from "@/lib/prisma";
 import { ApplicationCard } from "@/components/application-card";
+import type { Application } from "@prisma/client";
 
-function getLocalizedValue(app: any, fieldPrefix: string, locale: string) {
+// ИСПРАВЛЕНИЕ: Делаем функцию типобезопасной
+function getLocalizedValue(app: Application, fieldPrefix: 'title' | 'shortDescription' | 'description', locale: string): string | null {
   const localesInOrder = [locale, 'en', 'es', 'ru'];
   const uniqueLocales = [...new Set(localesInOrder)];
 
   for (const loc of uniqueLocales) {
-    const value = app[`${fieldPrefix}_${loc}`];
-    if (value) {
+    const key = `${fieldPrefix}_${loc}` as keyof Application;
+    const value = app[key];
+    // Проверяем, что значение является непустой строкой
+    if (typeof value === 'string' && value) {
       return value;
     }
   }
   return null;
 }
 
-// КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Обновляем сигнатуру функции для правильной работы с асинхронными params
 export default async function Home({ params }: { params: Promise<{ locale: string }> }) {
-  // Сначала ожидаем (await) params, и только потом извлекаем locale
   const { locale } = await params; 
   const t = await getTranslations("HomePage");
   const applications = await prisma.application.findMany({

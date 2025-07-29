@@ -2,7 +2,7 @@
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 // bcrypt здесь больше не нужен для сравнения, но оставим его для будущего, если понадобится хеширование
-import bcrypt from 'bcryptjs';
+
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [

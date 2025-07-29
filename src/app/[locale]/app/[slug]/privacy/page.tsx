@@ -1,14 +1,17 @@
 // file: src/app/[locale]/app/[slug]/privacy/page.tsx
 import prisma from '@/lib/prisma';
 import { notFound } from 'next/navigation';
+import type { Application } from "@prisma/client";
 
-function getLocalizedValue(app: any, fieldPrefix: string, locale: string) {
+// ИСПРАВЛЕНИЕ: Делаем функцию типобезопасной
+function getLocalizedValue(app: Application, fieldPrefix: 'title' | 'shortDescription' | 'description', locale: string): string | null {
   const localesInOrder = [locale, 'en', 'es', 'ru'];
   const uniqueLocales = [...new Set(localesInOrder)];
 
   for (const loc of uniqueLocales) {
-    const value = app[`${fieldPrefix}_${loc}`];
-    if (value) {
+    const key = `${fieldPrefix}_${loc}` as keyof Application;
+    const value = app[key];
+    if (typeof value === 'string' && value) {
       return value;
     }
   }
