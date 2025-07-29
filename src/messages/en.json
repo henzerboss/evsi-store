@@ -1,0 +1,62 @@
+{
+  "HomePage": {
+    "title": "evsi.store",
+    "subtitle": "A collection of apps crafted with attention to detail and a love for technology"
+  },
+  "LocaleSwitcher": {
+    "label": "Change language",
+    "en": "English",
+    "es": "Spanish",
+    "ru": "Russian"
+  },
+  "ThemeToggle": {
+    "toggle_theme": "Toggle theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "Navigation": {
+    "home": "Projects",
+    "about": "About",
+    "read_more": "Read more"
+  },
+  "Footer": {
+    "copyright": "© {year} evsi.store. All rights reserved.",
+    "privacy": "Privacy Policy"
+  },
+  "AboutPage": {
+    "greeting": "Hi, I'm",
+    "name": "Evgenii Evsiukov",
+    "role": "Mobile Application Developer",
+    "p1": "I create cross-platform mobile applications that solve real-world problems and are a pleasure to use. My philosophy is to combine clean, efficient code with an intuitive and aesthetic design.",
+    "p2": "This website is my digital showcase where I present my public projects. Every application here is the result of many hours of work, from the initial idea and design to publishing on the App Store and Google Play.",
+    "stack_title": "My Technology Stack",
+    "stack_items": {
+      "mobile": "Mobile Development",
+      "frontend": "Frontend",
+      "backend": "Backend & Databases"
+    },
+    "contact": "I am also open to mobile application development proposals. Have questions or suggestions? Contact me by email:"
+  },
+  "PrivacyPage": {
+    "title": "Website Privacy Policy",
+    "last_updated": "Last updated: July 29, 2025",
+    "p1": "This Privacy Policy describes how evsi.store (the \"Site\", \"we\", \"us\", or \"our\") collects, uses, and discloses your information when you visit our website.",
+    "h_info": "Information Collection and Use",
+    "p_info": "We do not collect any personally identifiable information (such as your name or email address) when you visit our Site. Your visit to the Site is anonymous.",
+    "h_cookies": "Cookies",
+    "p_cookies": "We use cookies solely for essential functional purposes. These cookies help remember your preferences, such as your chosen language and theme (light/dark). We do not use analytics or tracking cookies without your explicit consent.",
+    "h_analytics": "Analytics",
+    "p_analytics": "We use Google Analytics to collect anonymous statistics about site visits, such as the number of visitors and the most popular pages. This data helps us understand how our site is used and improve it. This data is collected only after your consent via the cookie banner.",
+    "h_links": "Third-Party Links",
+    "p_links": "Our Site contains links to app stores (App Store, Google Play) and other resources (GitHub). We are not responsible for the privacy practices or the content of these third-party sites.",
+    "h_changes": "Changes to This Privacy Policy",
+    "p_changes": "We may update our Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page.",
+    "h_contact": "Contact Us",
+    "p_contact": "If you have any questions about this Privacy Policy, you can contact us by email: support@evsi.store"
+  },
+  "CookieConsent": {
+    "message": "We use cookies for analytics and to enhance your experience on our site.",
+    "accept": "Accept"
+  }
+}

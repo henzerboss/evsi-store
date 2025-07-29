@@ -1,0 +1,62 @@
+{
+  "HomePage": {
+    "title": "evsi.store",
+    "subtitle": "Una colección de aplicaciones creadas con atención al detalle y amor por la tecnología"
+  },
+  "LocaleSwitcher": {
+    "label": "Cambiar idioma",
+    "en": "Inglés",
+    "es": "Español",
+    "ru": "Ruso"
+  },
+  "ThemeToggle": {
+    "toggle_theme": "Cambiar tema",
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  },
+  "Navigation": {
+    "home": "Proyectos",
+    "about": "Sobre mí",
+    "read_more": "Leer más"
+  },
+  "Footer": {
+    "copyright": "© {year} evsi.store. Todos los derechos reservados.",
+    "privacy": "Política de Privacidad"
+  },
+  "AboutPage": {
+    "greeting": "Hola, soy",
+    "name": "Evgenii Evsiukov",
+    "role": "Desarrollador de Aplicaciones Móviles",
+    "p1": "Creo aplicaciones móviles multiplataforma que resuelven problemas del mundo real y son un placer de usar. Mi filosofía es combinar un código limpio y eficiente con un diseño intuitivo y estético.",
+    "p2": "Este sitio web es mi escaparate digital donde presento mis proyectos públicos. Cada aplicación aquí es el resultado de muchas horas de trabajo, desde la idea inicial y el diseño hasta la publicación en la App Store y Google Play.",
+    "stack_title": "Mi Stack Tecnológico",
+    "stack_items": {
+      "mobile": "Desarrollo Móvil",
+      "frontend": "Frontend",
+      "backend": "Backend y Bases de Datos"
+    },
+    "contact": "También estoy abierto a propuestas para el desarrollo de aplicaciones móviles. ¿Tienes preguntas o sugerencias? Contáctame por correo electrónico:"
+  },
+  "PrivacyPage": {
+    "title": "Política de Privacidad del Sitio Web",
+    "last_updated": "Última actualización: 29 de julio de 2025",
+    "p1": "Esta Política de Privacidad describe cómo evsi.store (el \"Sitio\", \"nosotros\" o \"nuestro\") recopila, usa y divulga su información cuando visita nuestro sitio web.",
+    "h_info": "Recopilación y Uso de la Información",
+    "p_info": "No recopilamos ninguna información de identificación personal (como su nombre o dirección de correo electrónico) cuando visita nuestro Sitio. Su visita al Sitio es anónima.",
+    "h_cookies": "Cookies",
+    "p_cookies": "Utilizamos cookies únicamente con fines funcionales esenciales. Estas cookies ayudan a recordar sus preferencias, como el idioma y el tema elegidos (claro/oscuro). No utilizamos cookies de análisis o seguimiento sin su consentimiento explícito.",
+    "h_analytics": "Analíticas",
+    "p_analytics": "Usamos Google Analytics para recopilar estadísticas anónimas sobre las visitas al sitio, como el número de visitantes y las páginas más populares. Estos datos nos ayudan a comprender cómo se utiliza nuestro sitio y a mejorarlo. La recopilación de estos datos solo se realiza después de su consentimiento a través del banner de cookies.",
+    "h_links": "Enlaces de Terceros",
+    "p_links": "Nuestro Sitio contiene enlaces a tiendas de aplicaciones (App Store, Google Play) y otros recursos (GitHub). No somos responsables de las prácticas de privacidad ni del contenido de estos sitios de terceros.",
+    "h_changes": "Cambios a esta Política de Privacidad",
+    "p_changes": "Podemos actualizar nuestra Política de Privacidad de vez en cuando. Le notificaremos cualquier cambio publicando la nueva Política de Privacidad en esta página.",
+    "h_contact": "Contáctenos",
+    "p_contact": "Si tiene alguna pregunta sobre esta Política de Privacidad, puede contactarnos por correo electrónico: support@evsi.store"
+  },
+  "CookieConsent": {
+    "message": "Utilizamos cookies para análisis y para mejorar su experiencia en nuestro sitio.",
+    "accept": "Aceptar"
+  }
+}

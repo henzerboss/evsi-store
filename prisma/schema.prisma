@@ -1,0 +1,43 @@
+// file: prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Application {
+  id      String @id @default(cuid())
+  slug    String @unique
+  iconUrl String
+
+  // Поля для английского языка
+  title_en        String?
+  description_en  String?
+  shortDescription_en String? // <-- НОВОЕ ПОЛЕ
+
+  // Поля для испанского языка
+  title_es        String?
+  description_es  String?
+  shortDescription_es String? // <-- НОВОЕ ПОЛЕ
+
+  // Поля для русского языка
+  title_ru        String?
+  description_ru  String?
+  shortDescription_ru String? // <-- НОВОЕ ПОЛЕ
+
+  // Ссылки на сторы и GitHub
+  appStoreUrl   String?
+  googlePlayUrl String?
+  githubUrl     String?
+
+  // Политика конфиденциальности
+  privacyPolicy_en String?
+
+  // Временные метки
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

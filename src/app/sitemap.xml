@@ -1,0 +1,35 @@
+// file: src/app/sitemap.ts
+import { MetadataRoute } from 'next';
+import prisma from '@/lib/prisma';
+import { locales } from '@/i18n/routing'; // Импортируем наши локали
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const siteUrl = 'https://evsi.store';
+
+  // Получаем все приложения из базы
+  const applications = await prisma.application.findMany({
+    select: {
+      slug: true,
+      updatedAt: true,
+    },
+  });
+
+  // Генерируем URL для каждого приложения на каждом языке
+  const appUrls = applications.flatMap((app) =>
+    locales.map((locale) => ({
+      url: `${siteUrl}/${locale}/app/${app.slug}`,
+      lastModified: app.updatedAt,
+    }))
+  );
+
+  // Генерируем URL для статичных страниц на каждом языке
+  const staticPages = ['/', '/about', '/privacy'];
+  const staticUrls = staticPages.flatMap((path) =>
+    locales.map((locale) => ({
+      url: `${siteUrl}/${locale}${path === '/' ? '' : path}`,
+      lastModified: new Date(),
+    }))
+  );
+
+  return [...staticUrls, ...appUrls];
+}
