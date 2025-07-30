@@ -1,4 +1,7 @@
 // file: next.config.mjs
+
+import 'dotenv/config'; // <-- ДОБАВЬТЕ ЭТУ СТРОКУ
+
 import createNextIntlPlugin from 'next-intl/plugin';
  
 // Плагин сам найдет файл конфигурации по пути src/i18n/request.ts
