@@ -14,13 +14,14 @@ const handle = app.getRequestHandler();
 
 // Берем порт из package.json или по умолчанию
 const port = parseInt(process.env.npm_config_port, 10) || 10000;
+const hostname = '0.0.0.0';
 
 app.prepare().then(() => {
   createServer((req, res) => {
     const parsedUrl = parse(req.url, true);
     handle(req, res, parsedUrl);
-  }).listen(port, (err) => {
+  }).listen(port, hostname, (err) => {
     if (err) throw err;
-    console.log(`> Ready on http://localhost:${port}`);
+    console.log(`> Ready on http://${hostname}:${port}`);
   });
 });
