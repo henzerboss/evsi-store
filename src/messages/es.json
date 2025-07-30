@@ -1,7 +1,9 @@
 {
   "HomePage": {
     "title": "evsi.store",
-    "subtitle": "Una colección de aplicaciones creadas con atención al detalle y amor por la tecnología"
+    "subtitle": "Una colección de aplicaciones creadas con atención al detalle y amor por la tecnología",
+    "meta_title": "evsi.store | Aplicaciones de Evgenii Evsiukov",
+    "meta_description": "Un portafolio de aplicaciones móviles en React Native, desarrolladas por Evgenii Evsiukov. Explora los proyectos publicados en la App Store y Google Play."
   },
   "LocaleSwitcher": {
     "label": "Cambiar idioma",
@@ -25,6 +27,9 @@
     "privacy": "Política de Privacidad"
   },
   "AboutPage": {
+    "title": "Sobre Mí",
+    "meta_title": "Sobre Mí | evsi.store",
+    "meta_description": "Información de contacto del desarrollador de aplicaciones móviles Evgenii Evsiukov. Stack tecnológico y detalles sobre proyectos en React Native y Expo.",
     "greeting": "Hola, soy",
     "name": "Evgenii Evsiukov",
     "role": "Desarrollador de Aplicaciones Móviles",

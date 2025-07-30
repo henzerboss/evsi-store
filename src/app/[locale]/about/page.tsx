@@ -1,7 +1,17 @@
 // file: src/app/[locale]/about/page.tsx
 import { getTranslations } from "next-intl/server";
+import { getLocale } from "next-intl/server";
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image"; // Импортируем компонент Image
+
+export async function generateMetadata() {
+  const locale = await getLocale();
+  const t = await getTranslations({ locale, namespace: 'AboutPage' });
+  return {
+    title: t('meta_title'),
+    description: t('meta_description'),
+  };
+}
 
 export default async function AboutPage() {
   const t = await getTranslations("AboutPage");

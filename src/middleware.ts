@@ -6,5 +6,5 @@ export default createMiddleware(routing);
 
 export const config = {
   // Исключаем все пути, которые не должны обрабатываться
-  matcher: ['/((?!api|_next/static|_next/image|uploads|icon.svg|favicon.ico).*)']
+  matcher: ['/((?!api|_next/static|_next/image|uploads|icon.svg|favicon.ico|robots.txt|sitemap.xml).*)']
 };

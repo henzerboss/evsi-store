@@ -1,5 +1,6 @@
 // file: src/app/[locale]/page.tsx
 import { getTranslations } from "next-intl/server";
+import { getLocale } from "next-intl/server"; // Импортируем getLocale
 import prisma from "@/lib/prisma";
 import { ApplicationCard } from "@/components/application-card";
 import type { Application } from "@prisma/client";
@@ -20,12 +21,22 @@ function getLocalizedValue(app: Application, fieldPrefix: 'title' | 'shortDescri
   return null;
 }
 
+export async function generateMetadata() {
+  const locale = await getLocale();
+  const t = await getTranslations({ locale, namespace: 'HomePage' });
+  return {
+    title: t('meta_title'),
+    description: t('meta_description'),
+  };
+}
+
 export default async function Home({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params; 
   const t = await getTranslations("HomePage");
   const applications = await prisma.application.findMany({
     orderBy: { createdAt: 'desc' },
   });
+  
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
