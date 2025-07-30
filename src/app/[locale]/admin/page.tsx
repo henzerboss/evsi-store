@@ -1,5 +1,5 @@
 // file: src/app/[locale]/admin/page.tsx
-import { auth } from "@/app/api/auth/[...nextauth]/route";
+import { auth } from "@/auth"; // <-- ИЗМЕНИТЕ ПУТЬ
 import { redirect } from "next/navigation";
 import { AddApplicationForm } from "@/components/add-application-form";
 import { ApplicationsList } from "@/components/applications-list";

@@ -2,7 +2,7 @@
 'use server';
 
 
-import { signIn, signOut } from '@/app/api/auth/[...nextauth]/route'; // Добавляем signOut
+import { signIn, signOut } from '@/auth'; // <-- ИЗМЕНИТЕ ПУТЬ
 import { AuthError } from 'next-auth';
 
 export async function authenticate(

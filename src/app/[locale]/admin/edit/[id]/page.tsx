@@ -1,5 +1,5 @@
 // file: src/app/[locale]/admin/edit/[id]/page.tsx
-import { auth } from "@/app/api/auth/[...nextauth]/route";
+import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";

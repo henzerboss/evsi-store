@@ -3,7 +3,7 @@
 
 import prisma from '@/lib/prisma';
 import { revalidatePath } from 'next/cache';
-import { auth } from '@/app/api/auth/[...nextauth]/route';
+import { auth } from '@/auth'; // <-- ИЗМЕНИТЕ ПУТЬ
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { redirect } from 'next/navigation';
