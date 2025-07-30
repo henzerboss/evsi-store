@@ -5,10 +5,11 @@ import prisma from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { EditApplicationForm } from "@/components/edit-application-form";
 
+// ИСПРАВЛЕНИЕ: Обновляем интерфейс пропсов
 interface EditPageProps {
-    params: {
+    params: Promise<{
         id: string;
-    }
+    }>
 }
 
 export default async function EditPage({ params }: EditPageProps) {
@@ -17,8 +18,11 @@ export default async function EditPage({ params }: EditPageProps) {
         redirect('/login');
     }
 
+    // ИСПРАВЛЕНИЕ: Ожидаем params перед использованием
+    const { id } = await params;
+
     const app = await prisma.application.findUnique({
-        where: { id: params.id }
+        where: { id: id }
     });
 
     if (!app) {
