@@ -1,13 +1,25 @@
 // file: next.config.mjs
-
-import 'dotenv/config'; // <-- ДОБАВЬТЕ ЭТУ СТРОКУ
-
+import 'dotenv/config';
 import createNextIntlPlugin from 'next-intl/plugin';
- 
-// Плагин сам найдет файл конфигурации по пути src/i18n/request.ts
-const withNextIntl = createNextIntlPlugin();
- 
+
+const withNextIntl = createNextIntlPlugin(
+  './src/i18n.ts'
+);
+
 /** @type {import('next').NextConfig} */
-const nextConfig = {};
- 
+const nextConfig = {
+  // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ:
+  // Добавляем наш домен в список разрешенных для оптимизации изображений.
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'evsi.store',
+        port: '',
+        pathname: '/uploads/**',
+      },
+    ],
+  },
+};
+
 export default withNextIntl(nextConfig);
