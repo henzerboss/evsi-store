@@ -28,7 +28,7 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
     const description = getLocalizedValue(app, 'shortDescription', locale) || '';
 
     return {
-        title: `${title} | evsi.store`,
+        title: `${title} | iOS, Android`,
         description: description,
     };
 }
