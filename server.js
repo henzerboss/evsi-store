@@ -22,6 +22,6 @@ app.prepare().then(() => {
     handle(req, res, parsedUrl);
   }).listen(port, hostname, (err) => {
     if (err) throw err;
-    console.log(`> Ready on http://${hostname}:${port}`);
+    console.log(`> Ready on http://${hostname}:${port}`); 
   });
 });
