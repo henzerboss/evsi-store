@@ -38,10 +38,9 @@ export async function POST(req: NextRequest) {
             conversion_rates: data.conversion_rates,
         };
 
-        // 4. Сохраняем данные в публичный файл public/api/rates.json
-        // Приложение будет обращаться к нему по адресу https://evsi.store/api/rates.json
-        const filePath = path.join(process.cwd(), 'public', 'api', 'rates.json');
-        await fs.mkdir(path.dirname(filePath), { recursive: true }); // Создаем папки, если их нет
+        // 4. ИЗМЕНЕНИЕ ЗДЕСЬ: Сохраняем данные в public/rates.json
+        const filePath = path.join(process.cwd(), 'public', 'rates.json');
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
         await fs.writeFile(filePath, JSON.stringify(ratesToSave, null, 2));
 
         return NextResponse.json({ message: 'Rates updated successfully' }, { status: 200 });
@@ -51,3 +50,4 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ message: 'Internal Server Error', error: (error as Error).message }, { status: 500 });
     }
 }
+
