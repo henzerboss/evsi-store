@@ -3,8 +3,8 @@ export const runtime = 'nodejs'; // не edge
 
 type ModelCfg = {
   name: string;
-  weight: number;        // для взвешенного раунда
-  rpm: number;           // локальный таргет на инстанс (requests per minute)
+  weight: number;  // для взвешенного раунда
+  rpm: number;     // локальный таргет на инстанс (requests per minute)
 };
 
 const MODELS: ModelCfg[] = [
@@ -59,7 +59,7 @@ function markUse(model: string) {
   const key = minuteKey(model);
   rpmCounters.set(key, (rpmCounters.get(key) ?? 0) + 1);
 
-  // Лениво чистим старые ключи раз в какое-то время (очень дешёво)
+  // Лениво чистим старые ключи
   if (rpmCounters.size > 5000) {
     const thisMin = Math.floor(Date.now() / 60000);
     for (const k of rpmCounters.keys()) {
@@ -72,6 +72,9 @@ function markUse(model: string) {
 function modelToUrl(model: string, apiKey: string) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 }
+
+// Базовый «свободный» тип для тела запроса к Gemini
+type GeminiPayload = Record<string, unknown>;
 
 export async function POST(req: Request) {
   const headers = cors(req.headers.get('origin') ?? '');
@@ -91,58 +94,69 @@ export async function POST(req: Request) {
     });
   }
 
-  let payload: any;
+  let payload: GeminiPayload;
   try {
-    payload = await req.json();
+    const parsed = (await req.json()) as unknown;
+    if (parsed && typeof parsed === 'object') {
+      payload = parsed as GeminiPayload;
+    } else {
+      return new Response(JSON.stringify({ error: 'Bad JSON: object expected' }), {
+        status: 400, headers: { ...headers, 'Content-Type': 'application/json' },
+      });
+    }
   } catch {
     return new Response(JSON.stringify({ error: 'Bad JSON' }), {
       status: 400, headers: { ...headers, 'Content-Type': 'application/json' },
     });
   }
 
-  // 1) Возможность форсить модель из заголовка или payload.model
-  const forcedModel = (req.headers.get('x-model') || payload?.model || '').trim() || null;
-  // 2) Дет-хэш для стабильного распределения без общей памяти
+  // Возможность форсить модель из заголовка или payload.model
+  const headerModel = (req.headers.get('x-model') || '').trim();
+  const payloadModelVal = payload?.model;
+  const payloadModel = typeof payloadModelVal === 'string' ? payloadModelVal.trim() : '';
+  const forcedModel = (headerModel || payloadModel) || null;
+
+  // Дет-хэш для стабильного распределения без общей памяти
   const entropy =
     clientToken ||
-    payload?.userId ||
-    payload?.sessionId ||
-    payload?.id ||
+    (typeof payload?.userId === 'string' ? payload.userId : '') ||
+    (typeof payload?.sessionId === 'string' ? payload.sessionId : '') ||
+    (typeof payload?.id === 'string' ? payload.id : '') ||
     `${Date.now()}:${Math.random()}`;
 
-  // Чтобы не «дрожало» распределение, можно квантовать время (например, по 10 сек)
+  // Чтобы не «дрожало» распределение, квант времени (например, 10 сек)
   const timeQuantum = Math.floor(Date.now() / 10_000);
   const baseIdx = hash32(`${entropy}:${timeQuantum}`) % RING.length;
 
-  // Составим список попыток по кольцу (начиная с baseIdx)
+  // Список попыток по кольцу (начиная с baseIdx)
   const tryOrder: string[] = [];
   for (let i = 0; i < RING.length; i++) {
     tryOrder.push(RING[(baseIdx + i) % RING.length]);
   }
 
-  // Если модель форсится — используем её первой
+  // Если модель форсится — ставим её первой
   if (forcedModel) {
-    // Подменим первую модель на принудительную, а остальное — обычный порядок без дубликатов
     const rest = tryOrder.filter(m => m !== forcedModel);
     tryOrder.splice(0, tryOrder.length, forcedModel, ...rest);
   }
 
-  // Попытки: пропускаем модели, у которых локально исчерпан rpm, и делаем фолбэк при 429/5xx
   let lastErrorText = '';
   for (const model of tryOrder) {
-    const cfg = MODELS.find(m => m.name === model)!;
-
     // локальный rpm-гейт
     if (!canUseModelLocally(model)) {
       continue;
     }
 
     const url = modelToUrl(model, apiKey);
-    // Уберём служебные поля из payload, если они есть
-    const bodyToSend = { ...payload };
-    delete bodyToSend.model;
 
-    // Маркируем использование перед вызовом (опционально можно переносить после 2xx)
+    // Уберём служебное поле model из тела, если оно есть
+    const bodyToSend: GeminiPayload = { ...payload };
+    if ('model' in bodyToSend) {
+      // безопасное удаление без any
+      delete (bodyToSend as { model?: unknown }).model;
+    }
+
+    // Маркируем использование (можно перенести после 2xx — по вкусу)
     markUse(model);
 
     let r: Response;
@@ -152,8 +166,8 @@ export async function POST(req: Request) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bodyToSend),
       });
-    } catch (e: any) {
-      lastErrorText = String(e?.message || e) || 'fetch failed';
+    } catch (e: unknown) {
+      lastErrorText = e instanceof Error ? e.message : String(e);
       // сетевые ошибки — пробуем следующую модель
       continue;
     }
@@ -169,7 +183,11 @@ export async function POST(req: Request) {
 
     // При 429/5xx — фолбэк к следующей модели
     if (r.status === 429 || (r.status >= 500 && r.status <= 599)) {
-      lastErrorText = await r.text().catch(() => '');
+      try {
+        lastErrorText = await r.text();
+      } catch {
+        // ignore
+      }
       continue;
     }
 
