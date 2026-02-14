@@ -1,5 +1,3 @@
-// file: prisma/seed-channels.ts
-
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -63,7 +61,19 @@ const channels = [
 ];
 
 async function main() {
+  console.log('Connecting to database...');
+  
+  // DEBUG BLOCK: Проверяем доступные модели
+  // Если здесь выпадет ошибка, значит клиент сгенерирован неправильно
+ 
+  if (!prisma.tgChannel) {
+    console.error('❌ ОШИБКА: Модель tgChannel не найдена в prisma client!');
+    console.log('Доступные модели в Prisma Client:', Object.keys(prisma).filter(key => !key.startsWith('_')));
+    throw new Error('Prisma Client рассинхронизирован. Выполните rm -rf node_modules/.prisma && npx prisma generate');
+  }
+
   console.log('Start seeding channels...');
+  
   for (const channel of channels) {
     await prisma.tgChannel.upsert({
       where: { username: channel.username },
@@ -80,7 +90,7 @@ async function main() {
       },
     });
   }
-  console.log('Seeding finished.');
+  console.log(`✅ Seeding finished. Processed ${channels.length} channels.`);
 }
 
 main()

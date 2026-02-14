@@ -42,52 +42,40 @@ model Application {
   updatedAt DateTime @updatedAt
 }
 
-// ===== TG Jobs (Mini App + Stars) =====
 
+// --- НОВЫЕ МОДЕЛИ ДЛЯ TELEGRAM ---
 
 model TgChannel {
   id          String   @id @default(cuid())
   name        String
-  username    String   @unique // Например @analyst_job_geeklink
-  category    String   // Например "Аналитика", "Разработка"
-  priceStars  Int      // Цена в звездах
+  username    String   @unique
+  category    String
+  priceStars  Int
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   orders      TgOrderChannel[]
 }
 
-enum TgOrderType {
-  VACANCY
-  RESUME
-}
-
-enum TgOrderStatus {
-  PENDING                 // Создан, но не оплачен
-  PAID_WAITING_MODERATION // Оплачен, ждет проверки
-  PUBLISHED               // Опубликован админом
-  REJECTED_REFUNDED       // Отклонен, средства возвращены
-  FAILED                  // Ошибка оплаты
-}
+// Enum поддерживаются в Postgres/MySQL. Если используете SQLite, удалите enum и используйте String в модели
+// Для SQLite enum не работает нативно, Prisma эмулирует его, но лучше проверить.
+// Если возникнет ошибка с Enum на SQLite, замените тип поля в модели на String.
 
 model TgOrder {
-  id                      String        @id @default(cuid())
-  telegramUserId          String        // ID пользователя (BigInt в строке)
+  id                      String   @id @default(cuid())
+  telegramUserId          String
   telegramUsername        String?
   
-  type                    TgOrderType   @default(VACANCY)
+  type                    String   @default("VACANCY") // "VACANCY" | "RESUME"
   
-  // Храним структурированные данные формы (заголовок, зп, контакты и т.д.)
-  // Для PostgreSQL используй тип Json, для SQLite/MySQL - String (JSON.stringify)
-  payload                 String        @default("{}") 
-
-  totalAmount             Int           // Общая сумма
-  status                  TgOrderStatus @default(PENDING)
+  payload                 String   @default("{}") 
+  totalAmount             Int
+  status                  String   @default("PENDING") // "PENDING", "PAID_WAITING_MODERATION", "PUBLISHED", "REJECTED_REFUNDED"
   
-  // Критически важно для возвратов (Refunds)
   telegramPaymentChargeId String?       
-  
-  createdAt               DateTime      @default(now())
-  updatedAt               DateTime      @updatedAt
+  paymentId               String?
+
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
   
   channels                TgOrderChannel[]
 }
