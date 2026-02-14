@@ -41,3 +41,63 @@ model Application {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ===== TG Jobs (Mini App + Stars) =====
+
+
+model TgChannel {
+  id          String   @id @default(cuid())
+  name        String
+  username    String   @unique // Например @analyst_job_geeklink
+  category    String   // Например "Аналитика", "Разработка"
+  priceStars  Int      // Цена в звездах
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  orders      TgOrderChannel[]
+}
+
+enum TgOrderType {
+  VACANCY
+  RESUME
+}
+
+enum TgOrderStatus {
+  PENDING                 // Создан, но не оплачен
+  PAID_WAITING_MODERATION // Оплачен, ждет проверки
+  PUBLISHED               // Опубликован админом
+  REJECTED_REFUNDED       // Отклонен, средства возвращены
+  FAILED                  // Ошибка оплаты
+}
+
+model TgOrder {
+  id                      String        @id @default(cuid())
+  telegramUserId          String        // ID пользователя (BigInt в строке)
+  telegramUsername        String?
+  
+  type                    TgOrderType   @default(VACANCY)
+  
+  // Храним структурированные данные формы (заголовок, зп, контакты и т.д.)
+  // Для PostgreSQL используй тип Json, для SQLite/MySQL - String (JSON.stringify)
+  payload                 String        @default("{}") 
+
+  totalAmount             Int           // Общая сумма
+  status                  TgOrderStatus @default(PENDING)
+  
+  // Критически важно для возвратов (Refunds)
+  telegramPaymentChargeId String?       
+  
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+  
+  channels                TgOrderChannel[]
+}
+
+model TgOrderChannel {
+  id        String    @id @default(cuid())
+  orderId   String
+  channelId String
+  order     TgOrder   @relation(fields: [orderId], references: [id])
+  channel   TgChannel @relation(fields: [channelId], references: [id])
+
+  @@unique([orderId, channelId])
+}
