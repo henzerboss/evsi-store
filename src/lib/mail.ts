@@ -1,11 +1,9 @@
 import nodemailer from 'nodemailer';
 
-// Настройки вашего почтового сервера (evsi.store)
-// Убедитесь, что в .env указаны данные от support@evsi.store
-const SMTP_HOST = process.env.SMTP_HOST || 'mail.evsi.store';
+const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = parseInt(process.env.SMTP_PORT || '465');
-const SMTP_USER = process.env.SMTP_USER; // Логин (support@evsi.store)
-const SMTP_PASS = process.env.SMTP_PASS; // Пароль от почты
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
 
 const transporter = nodemailer.createTransport({
   host: SMTP_HOST,
@@ -15,6 +13,19 @@ const transporter = nodemailer.createTransport({
     user: SMTP_USER,
     pass: SMTP_PASS,
   },
+  // Для отладки (если сервер использует самоподписанный сертификат)
+  tls: {
+    rejectUnauthorized: false
+  }
+});
+
+// Проверка соединения при инициализации (поможет увидеть ошибку в логах сервера при старте)
+transporter.verify(function (error, success) {
+  if (error) {
+    console.error('❌ SMTP Connection Error:', error);
+  } else {
+    console.log('✅ SMTP Server is ready to take our messages');
+  }
 });
 
 export async function sendNotificationEmail(orderId: string, type: string, amount: number, username: string | null) {
@@ -23,28 +34,30 @@ export async function sendNotificationEmail(orderId: string, type: string, amoun
     return;
   }
 
-  const adminUrl = `https://evsi.store/ru/tg-admin`; // Ссылка на вашу админку
+  const adminUrl = `https://evsi.store/ru/tg-admin`; 
+
+  console.log(`📧 Attempting to send email to henzerboss@gmail.com...`);
 
   try {
-    await transporter.sendMail({
-      from: `"Evsi Bot" <support@evsi.store>`, // Отправитель
-      to: 'henzerboss@gmail.com', // Получатель (Админ)
+    const info = await transporter.sendMail({
+      from: `"Evsi Bot" <${SMTP_USER}>`, // ВАЖНО: Яндекс требует, чтобы тут была именно почта авторизации
+      to: 'henzerboss@gmail.com', 
       subject: `🔥 Новая заявка на модерацию: ${type}`,
       html: `
-        <h1>Поступила новая оплаченная заявка!</h1>
-        <p><b>Тип:</b> ${type === 'VACANCY' ? 'Вакансия' : 'Резюме'}</p>
-        <p><b>Пользователь:</b> ${username ? '@' + username : 'Скрыт'}</p>
-        <p><b>Сумма:</b> ${amount} ⭐️</p>
-        <p><b>ID заказа:</b> ${orderId}</p>
-        <br/>
-        <p>
-          <a href="${adminUrl}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+          <h2 style="color: #333;">Поступила новая оплаченная заявка!</h2>
+          <p><b>Тип:</b> ${type === 'VACANCY' ? '💼 Вакансия' : '👤 Резюме'}</p>
+          <p><b>Пользователь:</b> ${username ? '@' + username : 'Скрыт'}</p>
+          <p><b>Сумма:</b> <strong style="color: #d97706;">${amount} ⭐️</strong></p>
+          <p style="color: #777; font-size: 12px;">ID заказа: ${orderId}</p>
+          <br/>
+          <a href="${adminUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
             Перейти в админку
           </a>
-        </p>
+        </div>
       `,
     });
-    console.log(`📧 Email notification sent to henzerboss@gmail.com for order ${orderId}`);
+    console.log(`✅ Email sent successfully! Message ID: ${info.messageId}`);
   } catch (error) {
     console.error('❌ Failed to send email notification:', error);
   }
