@@ -3,12 +3,13 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { telegramRequest } from '@/lib/telegram';
+import { sendNotificationEmail } from '@/lib/mail'; // <-- Импорт новой функции
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 const prisma = globalForPrisma.prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
-// Определяем локальный интерфейс
+// Локальный интерфейс канала
 interface TgChannel {
   id: string;
   priceStars: number;
@@ -32,6 +33,7 @@ export async function GET() {
 export async function POST(req: Request) {
   const body = await req.json();
 
+  // 1. Создание инвойса
   if (body.action === 'create_invoice') {
     const { channelIds, payload, type, userId, username } = body;
 
@@ -77,6 +79,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ invoiceLink: tgResponse.result });
   }
 
+  // 2. Pre-checkout
   if (body.pre_checkout_query) {
     await telegramRequest('answerPreCheckoutQuery', {
       pre_checkout_query_id: body.pre_checkout_query.id,
@@ -85,12 +88,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // 3. Успешная оплата -> Отправка на модерацию
   if (body.message?.successful_payment) {
     const payment = body.message.successful_payment;
     const orderId = payment.invoice_payload;
     const chargeId = payment.telegram_payment_charge_id;
 
-    await prisma.tgOrder.update({
+    // Обновляем статус в БД
+    const updatedOrder = await prisma.tgOrder.update({
       where: { id: orderId },
       data: { 
         status: 'PAID_WAITING_MODERATION',
@@ -99,12 +104,21 @@ export async function POST(req: Request) {
       }
     });
     
-    // ОБНОВЛЕННЫЙ ТЕКСТ СООБЩЕНИЯ
+    // Уведомляем пользователя в Telegram
     await telegramRequest('sendMessage', {
         chat_id: body.message.chat.id,
         text: `✅ <b>Оплата прошла успешно!</b>\n\nВаша заявка отправлена на модерацию.\n\n⏳ <b>Модерация занимает до 24 часов.</b>\n📢 Публикация происходит ежедневно с 09:00 до 20:00 МСК.\n\nМы пришлем вам ссылки на посты сразу после публикации.`,
         parse_mode: 'HTML'
     });
+
+    // --- ОТПРАВКА EMAIL АДМИНУ ---
+    // Вызываем функцию без await, чтобы не задерживать ответ Телеграму
+    sendNotificationEmail(
+        updatedOrder.id, 
+        updatedOrder.type, 
+        updatedOrder.totalAmount, 
+        updatedOrder.telegramUsername
+    ).catch(e => console.error('Email send error:', e));
 
     return NextResponse.json({ ok: true });
   }
