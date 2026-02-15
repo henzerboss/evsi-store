@@ -1,8 +1,7 @@
-// file: src/app/tg-app/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatOrderText } from '@/lib/telegram'; // Используем функцию форматирования для превью
+// import { formatOrderText } from '@/lib/telegram'; // УБРАНО: Вызывает ошибку на клиенте из-за process.env
 
 // SVG Icons (чтобы не зависеть от библиотек)
 const ChevronLeft = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>;
@@ -53,6 +52,49 @@ const CHAR_LIMITS: Record<string, number> = {
     description: 2500,
     contacts: 150
 };
+
+// --- Вспомогательные функции (Локальные, чтобы не импортировать серверный код) ---
+
+function sanitize(str: string | undefined) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function formatOrderText(type: 'VACANCY' | 'RESUME', payload: FormData): string {
+  if (type === 'VACANCY') {
+    return `
+<b>💼 ВАКАНСИЯ: ${sanitize(payload.title)}</b>
+
+<b>Компания:</b> ${sanitize(payload.company)}
+<b>Зарплата:</b> ${sanitize(payload.salary || 'Не указана')}
+<b>Локация/Format:</b> ${sanitize(payload.location)}
+
+${sanitize(payload.description)}
+
+<b>Контакты:</b> ${sanitize(payload.contacts)}
+
+#вакансия
+    `.trim();
+  } else {
+    return `
+<b>👤 РЕЗЮМЕ: ${sanitize(payload.title)}</b>
+
+<b>Опыт:</b> ${sanitize(payload.experience)}
+<b>Зарплата:</b> ${sanitize(payload.salary || 'По договоренности')}
+<b>Навыки:</b> ${sanitize(payload.skills)}
+
+${sanitize(payload.description)}
+
+<b>Контакты:</b> ${sanitize(payload.contacts)}
+
+#резюме
+    `.trim();
+  }
+}
+// --------------------------------------------------------------------------
 
 export default function TgAppPage() {
   const [step, setStep] = useState(1);
