@@ -9,7 +9,7 @@ import { SignOutButton } from "@/components/sign-out-button";
 
 const prisma = new PrismaClient();
 
-// Определение локальных типов для устранения ошибки отсутствия экспортов
+// Локальные типы
 type TgOrderType = 'VACANCY' | 'RESUME';
 
 interface TgChannel {
@@ -28,7 +28,7 @@ interface TgOrder {
   id: string;
   telegramUserId: string;
   telegramUsername: string | null;
-  type: TgOrderType; // Используем строгий тип
+  type: TgOrderType; 
   payload: string;
   totalAmount: number;
   status: string;
@@ -37,19 +37,28 @@ interface TgOrder {
   channels: TgOrderChannel[];
 }
 
+// Интерфейс ответа Telegram при отправке сообщения
+interface TelegramMessageResponse {
+    result?: {
+        message_id: number;
+        chat: {
+            username?: string;
+            id: number;
+        }
+    }
+}
+
 async function moderateOrder(formData: FormData) {
   "use server";
   
   const orderId = formData.get('orderId') as string;
   const action = formData.get('action') as string;
   
-  // Приводим к типу any на этапе получения, а затем к нашему интерфейсу
   const rawOrder = await prisma.tgOrder.findUnique({
     where: { id: orderId },
     include: { channels: { include: { channel: true } } }
   });
 
-  // Безопасное приведение к нашему типу
   const order = rawOrder as unknown as TgOrder;
 
   if (!order || order.status !== 'PAID_WAITING_MODERATION') {
@@ -58,22 +67,36 @@ async function moderateOrder(formData: FormData) {
 
   if (action === 'approve') {
     const text = formatOrderText(order.type, order.payload);
+    const publishedLinks: string[] = [];
     
+    // Публикация и сбор ссылок
     for (const item of order.channels) {
         try {
-           await telegramRequest('sendMessage', {
+           const res = await telegramRequest<TelegramMessageResponse['result']>('sendMessage', {
                chat_id: item.channel.username,
                text: text,
                parse_mode: 'HTML'
            });
+
+           if (res.ok && res.result) {
+               // Формируем ссылку: https://t.me/username/message_id
+               const channelUser = item.channel.username.replace('@', '');
+               publishedLinks.push(`https://t.me/${channelUser}/${res.result.message_id}`);
+           }
         } catch (e) {
             console.error(`Error posting to ${item.channel.username}`, e);
         }
     }
 
+    // Формируем отчет пользователю
+    const linksList = publishedLinks.map((link, i) => `${i + 1}. ${link}`).join('\n');
+    const userMessage = `✅ <b>Ваша заявка опубликована!</b>\n\nСсылки на посты:\n${linksList}\n\nСпасибо, что пользуетесь нашим сервисом!`;
+
     await telegramRequest('sendMessage', {
         chat_id: order.telegramUserId,
-        text: '✅ Ваша заявка прошла модерацию и опубликована!',
+        text: userMessage,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
     });
 
     await prisma.tgOrder.update({
@@ -119,7 +142,6 @@ export default async function TgAdminPage() {
     include: { channels: { include: { channel: true } } }
   });
 
-  // Приведение к нашему типу для рендеринга
   const pendingOrders = rawPendingOrders as unknown as TgOrder[];
 
   return (
@@ -195,9 +217,6 @@ export default async function TgAdminPage() {
                                 ❌ Отклонить и вернуть {order.totalAmount} ⭐️
                             </button>
                         </form>
-                        <p className="text-xs text-gray-400 text-center mt-2">
-                            При отклонении средства вернутся пользователю моментально через Telegram API.
-                        </p>
                     </div>
                 </div>
               </div>
