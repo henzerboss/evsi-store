@@ -1,3 +1,4 @@
+// file: src/app/tg-app/page.tsx
 'use client';
 
 import { useEffect, useState, Dispatch, SetStateAction } from 'react';
@@ -38,16 +39,16 @@ interface FormData {
 }
 
 // --- Constants ---
-const MAX_TOTAL_CHARS = 3500;
+const MAX_TOTAL_CHARS = 3800; // Увеличили общий лимит
 const CHAR_LIMITS: Record<string, number> = {
-    title: 100,
-    company: 100,
-    salary: 50,
-    location: 100,
-    experience: 200,
-    skills: 300,
-    description: 2500,
-    contacts: 150
+    title: 150,
+    company: 150,
+    salary: 100,
+    location: 150,
+    experience: 500,
+    skills: 500,
+    description: 3000, // Увеличили лимит описания
+    contacts: 200
 };
 
 // --- Helpers ---
@@ -105,7 +106,7 @@ const getLabel = (field: string, activeTab: 'VACANCY' | 'RESUME') => {
     return labels[field] || field;
 };
 
-// --- Sub-Components (Moved outside to prevent re-renders) ---
+// --- Sub-Components ---
 
 const Step1TypeSelection = ({ setActiveTab, goNext }: { setActiveTab: (t: 'VACANCY' | 'RESUME') => void, goNext: () => void }) => (
     <div className="flex flex-col gap-4 mt-8">
@@ -155,25 +156,22 @@ const Step2Form = ({ formData, setFormData, activeTab }: { formData: FormData, s
             
             {multiline ? (
                 <textarea
-                className="w-full p-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm min-h-[140px] resize-none text-black"
+                className={`w-full p-3 bg-white border rounded-xl outline-none text-sm min-h-[140px] resize-none text-black transition-colors ${isOverLimit ? 'border-red-500 focus:border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent'}`}
                 placeholder={placeholder}
                 value={formData[field] || ''}
+                // ИСПРАВЛЕНО: Убрана блокировка ввода при превышении лимита. Теперь можно вставить любой текст.
                 onChange={e => {
-                    if (e.target.value.length <= limit) {
-                        setFormData(prev => ({...prev, [field]: e.target.value}));
-                    }
+                    setFormData(prev => ({...prev, [field]: e.target.value}));
                 }}
                 />
             ) : (
                 <input
                 type="text"
-                className="w-full p-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm text-black"
+                className={`w-full p-3 bg-white border rounded-xl outline-none text-sm text-black transition-colors ${isOverLimit ? 'border-red-500 focus:border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent'}`}
                 placeholder={placeholder}
                 value={formData[field] || ''}
                 onChange={e => {
-                    if (e.target.value.length <= limit) {
-                        setFormData(prev => ({...prev, [field]: e.target.value}));
-                    }
+                    setFormData(prev => ({...prev, [field]: e.target.value}));
                 }}
                 />
             )}
@@ -203,7 +201,6 @@ const Step2Form = ({ formData, setFormData, activeTab }: { formData: FormData, s
 };
 
 const Step3Channels = ({ channels, selectedIds, setSelectedIds }: { channels: Channel[], selectedIds: string[], setSelectedIds: Dispatch<SetStateAction<string[]>> }) => {
-    // Группировка
     const grouped = channels.reduce((acc, ch) => {
         if (!acc[ch.category]) acc[ch.category] = [];
         acc[ch.category].push(ch);
@@ -325,6 +322,7 @@ export default function TgAppPage() {
 
   // Валидация
   const validateForm = () => {
+      // 1. Обязательные поля
       const required = ['title', 'description', 'contacts'];
       for (const field of required) {
           if (!formData[field as keyof FormData]?.trim()) {
@@ -333,15 +331,26 @@ export default function TgAppPage() {
           }
       }
 
+      // 2. Лимиты полей (Проверяем здесь, раз разрешили ввод любой длины)
+      for (const [key, value] of Object.entries(formData)) {
+          const limit = CHAR_LIMITS[key];
+          if (limit && (value?.length || 0) > limit) {
+              window.Telegram?.WebApp?.showAlert(`Поле "${getLabel(key, activeTab)}" слишком длинное. Сократите до ${limit} символов.`);
+              return false;
+          }
+      }
+
+      // 3. Контакты
       const contactRegex = /(@[\w\d_]+|https?:\/\/[^\s]+|[\w\d._%+-]+@[\w\d.-]+\.[\w]{2,4})/i;
       if (!contactRegex.test(formData.contacts)) {
           window.Telegram?.WebApp?.showAlert('В контактах укажите @username, ссылку на сайт или email');
           return false;
       }
 
+      // 4. Общая длина
       const totalLen = Object.values(formData).reduce((acc, val) => acc + (val?.length || 0), 0);
       if (totalLen > MAX_TOTAL_CHARS) {
-           window.Telegram?.WebApp?.showAlert(`Слишком длинный текст (${totalLen}/${MAX_TOTAL_CHARS}). Сократите описание.`);
+           window.Telegram?.WebApp?.showAlert(`Общий размер текста слишком большой (${totalLen}/${MAX_TOTAL_CHARS}). Сократите описание.`);
            return false;
       }
 
@@ -387,7 +396,7 @@ export default function TgAppPage() {
             if (status === 'paid') window.Telegram.WebApp.close();
         });
       }
-    } catch (e) {
+    } catch {
       alert('Ошибка создания заказа');
     }
   };
