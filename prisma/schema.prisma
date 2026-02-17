@@ -89,3 +89,43 @@ model TgOrderChannel {
 
   @@unique([orderId, channelId])
 }
+
+// --- RANDOM COFFEE MODELS ---
+
+model RandomCoffeeProfile {
+  id             String   @id @default(cuid())
+  telegramUserId String   @unique // ID пользователя Telegram
+  name           String
+  specialty      String
+  interests      String
+  linkedin       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  participations RandomCoffeeParticipation[]
+}
+
+model RandomCoffeeParticipation {
+  id             String   @id @default(cuid())
+  profileId      String
+  profile        RandomCoffeeProfile @relation(fields: [profileId], references: [id])
+  
+  status         String   @default("PAID") // PAID, MATCHED, REFUNDED
+  matchDate      DateTime // Дата пятницы, на которую записан
+  
+  telegramPaymentChargeId String? // Для возврата средств
+  
+  createdAt      DateTime @default(now())
+  
+  // Связь с парой (если распределен)
+  matchWithId    String?  // ID профиля партнера
+}
+
+model RandomCoffeeHistory {
+  id        String   @id @default(cuid())
+  userAId   String
+  userBId   String
+  date      DateTime @default(now())
+
+  @@unique([userAId, userBId]) // Чтобы быстро проверять, были ли они уже вместе
+}

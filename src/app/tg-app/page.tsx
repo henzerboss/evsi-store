@@ -7,6 +7,7 @@ import { useEffect, useState, Dispatch, SetStateAction } from 'react';
 const ChevronLeft = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>;
 const Briefcase = () => <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>;
 const UserCircle = () => <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>;
+const Coffee = () => <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" x2="6" y1="2" y2="4"/><line x1="10" x2="10" y1="2" y2="4"/><line x1="14" x2="14" y1="2" y2="4"/></svg>;
 
 // --- Types ---
 type Channel = {
@@ -27,19 +28,28 @@ interface TelegramUser {
 }
 
 interface FormData {
+  // Общие поля
   title: string;
   description: string;
   contacts: string;
+  // Вакансия
   salary: string;
   company?: string;
   location?: string;
+  // Резюме
   experience?: string;
   skills?: string;
+  // Random Coffee
+  rcName?: string;
+  rcSpecialty?: string;
+  rcInterests?: string;
+  rcLinkedin?: string;
+  
   [key: string]: string | undefined;
 }
 
 // --- Constants ---
-const MAX_TOTAL_CHARS = 3800; // Увеличили общий лимит
+const MAX_TOTAL_CHARS = 3800; 
 const CHAR_LIMITS: Record<string, number> = {
     title: 150,
     company: 150,
@@ -47,8 +57,13 @@ const CHAR_LIMITS: Record<string, number> = {
     location: 150,
     experience: 500,
     skills: 500,
-    description: 3000, // Увеличили лимит описания
-    contacts: 200
+    description: 3000,
+    contacts: 200,
+    // RC limits
+    rcName: 100,
+    rcSpecialty: 100,
+    rcInterests: 500,
+    rcLinkedin: 200
 };
 
 // --- Helpers ---
@@ -60,7 +75,7 @@ function sanitize(str: string | undefined) {
     .replace(/>/g, '&gt;');
 }
 
-function formatOrderText(type: 'VACANCY' | 'RESUME', payload: FormData): string {
+function formatOrderText(type: 'VACANCY' | 'RESUME' | 'RANDOM_COFFEE', payload: FormData): string {
   if (type === 'VACANCY') {
     return `
 <b>💼 ВАКАНСИЯ: ${sanitize(payload.title)}</b>
@@ -75,7 +90,7 @@ ${sanitize(payload.description)}
 
 #вакансия
     `.trim();
-  } else {
+  } else if (type === 'RESUME') {
     return `
 <b>👤 РЕЗЮМЕ: ${sanitize(payload.title)}</b>
 
@@ -89,10 +104,20 @@ ${sanitize(payload.description)}
 
 #резюме
     `.trim();
+  } else {
+      return `
+<b>☕️ Random Coffee: ${sanitize(payload.rcName)}</b>
+
+<b>Специальность:</b> ${sanitize(payload.rcSpecialty)}
+<b>Интересы:</b> ${sanitize(payload.rcInterests)}
+${payload.rcLinkedin ? `<b>LinkedIn:</b> ${sanitize(payload.rcLinkedin)}` : ''}
+
+<i>Ваша анкета готова к участию в пятничном нетворкинге!</i>
+      `.trim();
   }
 }
 
-const getLabel = (field: string, activeTab: 'VACANCY' | 'RESUME') => {
+const getLabel = (field: string, activeTab: string) => {
     const labels: Record<string, string> = {
         title: activeTab === 'VACANCY' ? 'Должность' : 'Желаемая должность',
         company: 'Компания',
@@ -101,14 +126,19 @@ const getLabel = (field: string, activeTab: 'VACANCY' | 'RESUME') => {
         experience: 'Опыт работы',
         skills: 'Ключевые навыки',
         description: 'Описание',
-        contacts: 'Контакты'
+        contacts: 'Контакты',
+        // RC
+        rcName: 'Ваше Имя',
+        rcSpecialty: 'Специальность',
+        rcInterests: 'Профессиональные интересы',
+        rcLinkedin: 'Ссылка на LinkedIn (опционально)'
     };
     return labels[field] || field;
 };
 
 // --- Sub-Components ---
 
-const Step1TypeSelection = ({ setActiveTab, goNext }: { setActiveTab: (t: 'VACANCY' | 'RESUME') => void, goNext: () => void }) => (
+const Step1TypeSelection = ({ setActiveTab, goNext }: { setActiveTab: (t: 'VACANCY' | 'RESUME' | 'RANDOM_COFFEE') => void, goNext: () => void }) => (
     <div className="flex flex-col gap-4 mt-8">
         <button 
             onClick={() => { setActiveTab('VACANCY'); goNext(); }}
@@ -135,10 +165,24 @@ const Step1TypeSelection = ({ setActiveTab, goNext }: { setActiveTab: (t: 'VACAN
                 <p className="text-sm text-gray-500">Разместить резюме</p>
             </div>
         </button>
+
+        <button 
+            onClick={() => { setActiveTab('RANDOM_COFFEE'); goNext(); }}
+            className="bg-white p-6 rounded-2xl shadow-sm border border-transparent hover:border-orange-500 transition active:scale-95 flex items-center gap-4 relative overflow-hidden"
+        >
+            <div className="absolute top-0 right-0 bg-orange-500 text-white text-[10px] px-2 py-1 rounded-bl-lg font-bold">NEW</div>
+            <div className="bg-orange-100 p-4 rounded-full text-orange-600">
+                <Coffee />
+            </div>
+            <div className="text-left">
+                <h3 className="text-lg font-bold text-gray-900">Случайный кофе</h3>
+                <p className="text-sm text-gray-500">Нетворкинг по пятницам (100 ⭐️)</p>
+            </div>
+        </button>
     </div>
 );
 
-const Step2Form = ({ formData, setFormData, activeTab }: { formData: FormData, setFormData: Dispatch<SetStateAction<FormData>>, activeTab: 'VACANCY' | 'RESUME' }) => {
+const Step2Form = ({ formData, setFormData, activeTab }: { formData: FormData, setFormData: Dispatch<SetStateAction<FormData>>, activeTab: string }) => {
     const renderInput = (field: keyof FormData, placeholder: string, multiline = false) => {
         const fieldName = field as string; 
         const currentLength = formData[field]?.length || 0;
@@ -159,7 +203,6 @@ const Step2Form = ({ formData, setFormData, activeTab }: { formData: FormData, s
                 className={`w-full p-3 bg-white border rounded-xl outline-none text-sm min-h-[140px] resize-none text-black transition-colors ${isOverLimit ? 'border-red-500 focus:border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent'}`}
                 placeholder={placeholder}
                 value={formData[field] || ''}
-                // ИСПРАВЛЕНО: Убрана блокировка ввода при превышении лимита. Теперь можно вставить любой текст.
                 onChange={e => {
                     setFormData(prev => ({...prev, [field]: e.target.value}));
                 }}
@@ -181,21 +224,41 @@ const Step2Form = ({ formData, setFormData, activeTab }: { formData: FormData, s
 
       return (
           <div className="bg-white p-5 rounded-2xl shadow-sm space-y-2 pb-8">
-              {renderInput('title', 'Например: Senior React Developer')}
-              
               {activeTab === 'VACANCY' && (
-                  <div className="grid grid-cols-2 gap-3">
-                      {renderInput('company', 'Google')}
-                      {renderInput('location', 'Москва, Офис')}
-                  </div>
+                  <>
+                    {renderInput('title', 'Например: Senior React Developer')}
+                    <div className="grid grid-cols-2 gap-3">
+                        {renderInput('company', 'Google')}
+                        {renderInput('location', 'Москва, Офис')}
+                    </div>
+                    {renderInput('salary', 'от 200 000 руб')}
+                    {renderInput('description', 'Подробное описание задач и требований...', true)}
+                    {renderInput('contacts', '@username, email@ya.ru или ссылка')}
+                  </>
               )}
-              {renderInput('salary', 'от 200 000 руб')}
               
-              {activeTab === 'RESUME' && renderInput('experience', '5 лет, Яндекс...')}
-              {activeTab === 'RESUME' && renderInput('skills', 'JS, TS, React, Node.js')}
+              {activeTab === 'RESUME' && (
+                  <>
+                    {renderInput('title', 'Например: Senior React Developer')}
+                    {renderInput('salary', 'от 200 000 руб')}
+                    {renderInput('experience', '5 лет, Яндекс...')}
+                    {renderInput('skills', 'JS, TS, React, Node.js')}
+                    {renderInput('description', 'О себе...', true)}
+                    {renderInput('contacts', '@username, email@ya.ru или ссылка')}
+                  </>
+              )}
 
-              {renderInput('description', 'Подробное описание задач и требований...', true)}
-              {renderInput('contacts', '@username, email@ya.ru или ссылка')}
+              {activeTab === 'RANDOM_COFFEE' && (
+                  <>
+                    <p className="text-xs text-gray-500 mb-4 bg-orange-50 p-3 rounded-lg border border-orange-100">
+                        Эти данные будут сохранены и показаны вашему собеседнику в случае совпадения.
+                    </p>
+                    {renderInput('rcName', 'Иван Иванов')}
+                    {renderInput('rcSpecialty', 'Product Manager, Python Dev...')}
+                    {renderInput('rcInterests', 'О чем хотите поговорить? AI, стартапы, рыбалка...', true)}
+                    {renderInput('rcLinkedin', 'https://linkedin.com/in/...')}
+                  </>
+              )}
           </div>
       );
 };
@@ -247,9 +310,52 @@ const Step3Channels = ({ channels, selectedIds, setSelectedIds }: { channels: Ch
     );
 };
 
-const Step4Preview = ({ activeTab, formData }: { activeTab: 'VACANCY' | 'RESUME', formData: FormData }) => {
+const Step4Preview = ({ activeTab, formData }: { activeTab: 'VACANCY' | 'RESUME' | 'RANDOM_COFFEE', formData: FormData }) => {
     const rawText = formatOrderText(activeTab, formData);
     const htmlContent = rawText.replace(/\n/g, '<br/>');
+
+    if (activeTab === 'RANDOM_COFFEE') {
+        return (
+            <div className="space-y-6">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-orange-100 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-400 to-yellow-400"></div>
+                    <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                        <span className="text-2xl">☕️</span> Карточка участника
+                    </h3>
+                    <div className="space-y-3 text-sm">
+                        <div>
+                            <span className="text-gray-400 text-xs uppercase font-bold">Имя</span>
+                            <div className="text-gray-900 font-medium">{formData.rcName}</div>
+                        </div>
+                        <div>
+                            <span className="text-gray-400 text-xs uppercase font-bold">Специальность</span>
+                            <div className="text-gray-900">{formData.rcSpecialty}</div>
+                        </div>
+                        <div>
+                            <span className="text-gray-400 text-xs uppercase font-bold">Интересы</span>
+                            <div className="text-gray-900">{formData.rcInterests}</div>
+                        </div>
+                        {formData.rcLinkedin && (
+                            <div>
+                                <span className="text-gray-400 text-xs uppercase font-bold">LinkedIn</span>
+                                <div className="text-blue-500 truncate">{formData.rcLinkedin}</div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+                
+                <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-sm text-orange-800">
+                    <p className="font-bold mb-1">ℹ️ Как это работает:</p>
+                    <ul className="list-disc list-inside space-y-1 text-xs opacity-90">
+                        <li>Распределение: Ближайшая пятница 10:00 МСК</li>
+                        <li>Мы подберем вам пару по интересам</li>
+                        <li>Если пары не будет — вернем 100 звезд</li>
+                        <li>Бот пришлет контакт собеседника в ЛС</li>
+                    </ul>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">
@@ -279,7 +385,7 @@ const Step4Preview = ({ activeTab, formData }: { activeTab: 'VACANCY' | 'RESUME'
 
 export default function TgAppPage() {
   const [step, setStep] = useState(1);
-  const [activeTab, setActiveTab] = useState<'VACANCY' | 'RESUME'>('VACANCY');
+  const [activeTab, setActiveTab] = useState<'VACANCY' | 'RESUME' | 'RANDOM_COFFEE'>('VACANCY');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -288,7 +394,8 @@ export default function TgAppPage() {
   
   const [formData, setFormData] = useState<FormData>({
     title: '', description: '', contacts: '', salary: '',
-    company: '', location: '', experience: '', skills: ''
+    company: '', location: '', experience: '', skills: '',
+    rcName: '', rcSpecialty: '', rcInterests: '', rcLinkedin: ''
   });
 
   // Загрузка
@@ -313,6 +420,11 @@ export default function TgAppPage() {
              const target = data.find((c: Channel) => c.id === startParam || c.username.replace('@', '') === startParam);
              if (target) setSelectedIds([target.id]);
           }
+
+          // Если выбрали Random Coffee, пробуем подгрузить профиль
+          // Здесь можно сделать отдельный fetch, но пока для простоты оставим пустым
+          // или добавим логику загрузки профиля, если это критично.
+          // В идеале: fetch('/api/tg-jobs?action=get_profile&userId=' + tg.initDataUnsafe.user.id)
         }
       } catch (e) { console.error(e); }
       setLoading(false);
@@ -320,10 +432,36 @@ export default function TgAppPage() {
     init();
   }, []);
 
+  // Загрузка профиля при выборе Random Coffee
+  useEffect(() => {
+      if (activeTab === 'RANDOM_COFFEE' && tgUser?.id) {
+          fetch(`/api/tg-jobs?action=get_profile&userId=${tgUser.id}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.profile) {
+                    setFormData(prev => ({
+                        ...prev,
+                        rcName: data.profile.name || '',
+                        rcSpecialty: data.profile.specialty || '',
+                        rcInterests: data.profile.interests || '',
+                        rcLinkedin: data.profile.linkedin || ''
+                    }));
+                }
+            })
+            .catch(e => console.error("Profile load error", e));
+      }
+  }, [activeTab, tgUser]);
+
   // Валидация
   const validateForm = () => {
-      // 1. Обязательные поля
-      const required = ['title', 'description', 'contacts'];
+      let required: string[] = [];
+      
+      if (activeTab === 'VACANCY' || activeTab === 'RESUME') {
+          required = ['title', 'description', 'contacts'];
+      } else if (activeTab === 'RANDOM_COFFEE') {
+          required = ['rcName', 'rcSpecialty', 'rcInterests'];
+      }
+
       for (const field of required) {
           if (!formData[field as keyof FormData]?.trim()) {
               window.Telegram?.WebApp?.showAlert(`Поле "${getLabel(field, activeTab)}" обязательно для заполнения`);
@@ -331,23 +469,16 @@ export default function TgAppPage() {
           }
       }
 
-      // 2. Лимиты полей (Проверяем здесь, раз разрешили ввод любой длины)
-      for (const [key, value] of Object.entries(formData)) {
-          const limit = CHAR_LIMITS[key];
-          if (limit && (value?.length || 0) > limit) {
-              window.Telegram?.WebApp?.showAlert(`Поле "${getLabel(key, activeTab)}" слишком длинное. Сократите до ${limit} символов.`);
+      // Доп проверки для вакансий/резюме
+      if (activeTab !== 'RANDOM_COFFEE') {
+          const contactRegex = /(@[\w\d_]+|https?:\/\/[^\s]+|[\w\d._%+-]+@[\w\d.-]+\.[\w]{2,4})/i;
+          if (!contactRegex.test(formData.contacts)) {
+              window.Telegram?.WebApp?.showAlert('В контактах укажите @username, ссылку на сайт или email');
               return false;
           }
       }
 
-      // 3. Контакты
-      const contactRegex = /(@[\w\d_]+|https?:\/\/[^\s]+|[\w\d._%+-]+@[\w\d.-]+\.[\w]{2,4})/i;
-      if (!contactRegex.test(formData.contacts)) {
-          window.Telegram?.WebApp?.showAlert('В контактах укажите @username, ссылку на сайт или email');
-          return false;
-      }
-
-      // 4. Общая длина
+      // Общая длина
       const totalLen = Object.values(formData).reduce((acc, val) => acc + (val?.length || 0), 0);
       if (totalLen > MAX_TOTAL_CHARS) {
            window.Telegram?.WebApp?.showAlert(`Общий размер текста слишком большой (${totalLen}/${MAX_TOTAL_CHARS}). Сократите описание.`);
@@ -360,22 +491,31 @@ export default function TgAppPage() {
   // Навигация
   const goNext = () => {
       if (step === 2 && !validateForm()) return;
-      if (step === 3 && selectedIds.length === 0) {
+      if (step === 3 && activeTab !== 'RANDOM_COFFEE' && selectedIds.length === 0) {
           window.Telegram?.WebApp?.showAlert('Выберите хотя бы один канал');
           return;
       }
-      setStep(prev => prev + 1);
+      // Для Random Coffee пропускаем шаг 3 (выбор каналов)
+      if (step === 2 && activeTab === 'RANDOM_COFFEE') {
+          setStep(4);
+      } else {
+          setStep(prev => prev + 1);
+      }
       window.scrollTo(0,0);
   };
   
   const goBack = () => {
-      setStep(prev => prev - 1);
+      if (step === 4 && activeTab === 'RANDOM_COFFEE') {
+          setStep(2);
+      } else {
+          setStep(prev => prev - 1);
+      }
       window.scrollTo(0,0);
   };
 
-  const totalPrice = channels
-    .filter((c) => selectedIds.includes(c.id))
-    .reduce((sum, c) => sum + c.priceStars, 0);
+  const totalPrice = activeTab === 'RANDOM_COFFEE' 
+    ? 100 
+    : channels.filter((c) => selectedIds.includes(c.id)).reduce((sum, c) => sum + c.priceStars, 0);
 
   const handlePay = async () => {
     try {
@@ -383,7 +523,7 @@ export default function TgAppPage() {
         method: 'POST',
         body: JSON.stringify({
             action: 'create_invoice',
-            channelIds: selectedIds,
+            channelIds: activeTab === 'RANDOM_COFFEE' ? [] : selectedIds,
             type: activeTab,
             payload: formData,
             userId: tgUser?.id || '12345',
@@ -415,7 +555,7 @@ export default function TgAppPage() {
             ) : <div className="w-8" />}
             
             <div className="font-semibold text-sm">
-                Шаг {step} из 4
+                Шаг {step === 4 && activeTab === 'RANDOM_COFFEE' ? '3' : step} из {activeTab === 'RANDOM_COFFEE' ? '3' : '4'}
             </div>
             <div className="w-8" /> 
         </div>
@@ -424,7 +564,7 @@ export default function TgAppPage() {
         <div className="h-1 bg-gray-200 w-full">
             <div 
                 className="h-full bg-blue-500 transition-all duration-300 ease-out"
-                style={{ width: `${(step / 4) * 100}%` }}
+                style={{ width: `${(step / (activeTab === 'RANDOM_COFFEE' ? 4 : 4)) * 100}%` }}
             />
         </div>
 
@@ -432,20 +572,22 @@ export default function TgAppPage() {
         <div className="p-4 max-w-lg mx-auto">
             {step === 1 && (
                 <div className="text-center mt-4">
-                    <h1 className="text-2xl font-bold mb-2">Что публикуем?</h1>
-                    <p className="text-gray-500 text-sm">Выберите тип объявления</p>
+                    <h1 className="text-2xl font-bold mb-2">Что запускаем?</h1>
+                    <p className="text-gray-500 text-sm">Выберите сервис</p>
                     <Step1TypeSelection setActiveTab={setActiveTab} goNext={goNext} />
                 </div>
             )}
             
             {step === 2 && (
                 <>
-                    <h2 className="text-xl font-bold mb-4 px-1">Заполните данные</h2>
+                    <h2 className="text-xl font-bold mb-4 px-1">
+                        {activeTab === 'RANDOM_COFFEE' ? 'Ваш профиль' : 'Заполните данные'}
+                    </h2>
                     <Step2Form formData={formData} setFormData={setFormData} activeTab={activeTab} />
                 </>
             )}
 
-            {step === 3 && (
+            {step === 3 && activeTab !== 'RANDOM_COFFEE' && (
                 <>
                     <h2 className="text-xl font-bold mb-4 px-1">Выберите каналы</h2>
                     <Step3Channels channels={channels} selectedIds={selectedIds} setSelectedIds={setSelectedIds} />
@@ -454,7 +596,9 @@ export default function TgAppPage() {
 
             {step === 4 && (
                 <>
-                    <h2 className="text-xl font-bold mb-4 px-1">Проверка</h2>
+                    <h2 className="text-xl font-bold mb-4 px-1">
+                        {activeTab === 'RANDOM_COFFEE' ? 'Подтверждение' : 'Проверка'}
+                    </h2>
                     <Step4Preview activeTab={activeTab} formData={formData} />
                 </>
             )}
@@ -464,7 +608,7 @@ export default function TgAppPage() {
         {step > 1 && (
             <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 safe-area-bottom z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
                 <div className="max-w-lg mx-auto flex items-center gap-4">
-                    {step === 3 && (
+                    {(step === 3 || (activeTab === 'RANDOM_COFFEE' && step === 4)) && (
                         <div className="flex-1">
                             <div className="text-xs text-gray-400">Итого:</div>
                             <div className="text-lg font-bold text-gray-900">⭐️ {totalPrice}</div>
@@ -473,14 +617,16 @@ export default function TgAppPage() {
                     
                     <button
                         onClick={step === 4 ? handlePay : goNext}
-                        disabled={step === 3 && totalPrice === 0}
+                        disabled={step === 3 && activeTab !== 'RANDOM_COFFEE' && totalPrice === 0}
                         className={`
                             bg-blue-600 text-white font-bold py-3 px-6 rounded-xl transition active:scale-95 shadow-lg shadow-blue-200
-                            ${step === 3 ? 'w-auto px-8' : 'w-full'}
+                            ${(step === 3 || step === 4) ? 'w-auto px-8' : 'w-full'}
                             disabled:opacity-50 disabled:cursor-not-allowed
                         `}
                     >
-                        {step === 4 ? `Оплатить ⭐️ ${totalPrice}` : 'Далее'}
+                        {step === 4 
+                            ? (activeTab === 'RANDOM_COFFEE' ? `Участвовать (⭐️ ${totalPrice})` : `Оплатить ⭐️ ${totalPrice}`) 
+                            : 'Далее'}
                     </button>
                 </div>
             </div>
