@@ -571,11 +571,15 @@ export default function TgAppPage() {
                   const data = await res.json();
                   if (data.ok) {
                       setIsParticipating(false);
+                      // FIX: Use native showAlert for the success message
                       window.Telegram?.WebApp?.showAlert('Участие отменено, средства возвращены.');
                   } else {
-                      alert('Ошибка отмены: ' + (data.error || 'Unknown'));
+                      // FIX: Use native showAlert for the error message
+                      window.Telegram?.WebApp?.showAlert('Ошибка отмены: ' + (data.error || 'Unknown'));
                   }
-              } catch { alert('Ошибка соединения'); }
+              } catch { 
+                  window.Telegram?.WebApp?.showAlert('Ошибка соединения'); 
+              }
           }
       });
   };

@@ -23,8 +23,7 @@ function getNextFriday() {
     const day = d.getDay();
     const diff = 5 - day; 
     
-    // Если сегодня пятница и уже прошло 10 утра (распределение), то берем следующую
-    // Для простоты, если сегодня пятница, считаем следующую
+    // Если сегодня пятница, считаем следующую
     const daysToAdd = diff <= 0 ? diff + 7 : diff;
     
     d.setDate(d.getDate() + daysToAdd);
@@ -44,7 +43,6 @@ export async function GET(req: Request) {
               where: { telegramUserId: String(userId) }
           });
 
-          // Проверяем, участвует ли уже в ближайшей пятнице
           let isParticipating = false;
           if (profile) {
               const nextFriday = getNextFriday();
@@ -83,7 +81,6 @@ export async function POST(req: Request) {
       const { userId } = body;
       const nextFriday = getNextFriday();
 
-      // Ищем активную запись
       const participation = await prisma.randomCoffeeParticipation.findFirst({
           where: {
               profile: { telegramUserId: String(userId) },
@@ -94,18 +91,19 @@ export async function POST(req: Request) {
       });
 
       if (!participation || !participation.telegramPaymentChargeId) {
-           return NextResponse.json({ error: 'No active participation found' }, { status: 400 });
+           return NextResponse.json({ error: 'Запись не найдена или уже отменена' }, { status: 400 });
       }
 
       // Делаем возврат звезд
       const refundRes = await telegramRequest('refundStarPayment', {
-          user_id: parseInt(participation.profile.telegramUserId),
+          user_id: parseInt(participation.profile.telegramUserId, 10), // Явно указываем систему счисления
           telegram_payment_charge_id: participation.telegramPaymentChargeId
       });
 
       if (!refundRes.ok) {
-           console.error('Refund failed', refundRes);
-           return NextResponse.json({ error: 'Refund failed' }, { status: 500 });
+           console.error('Refund failed:', refundRes);
+           // Возвращаем реальную причину от Telegram
+           return NextResponse.json({ error: refundRes.description || 'Ошибка возврата средств (Telegram API)' }, { status: 500 });
       }
 
       // Обновляем статус в БД
@@ -232,7 +230,6 @@ export async function POST(req: Request) {
             }
         });
 
-        // Уведомление пользователю
         const dateStr = nextFriday.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
         await telegramRequest('sendMessage', {
             chat_id: body.message.chat.id,
@@ -240,7 +237,6 @@ export async function POST(req: Request) {
             parse_mode: 'HTML'
         });
 
-        // Уведомление Админу (Random Coffee)
         if (adminChatId) {
             try {
                 await telegramRequest('sendMessage', {
@@ -267,7 +263,6 @@ export async function POST(req: Request) {
         parse_mode: 'HTML'
     });
 
-    // Уведомление админу (Вакансии/Резюме) - Восстановлен старый формат
     if (adminChatId) {
         try {
             await telegramRequest('sendMessage', {
