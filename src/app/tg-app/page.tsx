@@ -5,6 +5,7 @@ import { useEffect, useState, Dispatch, SetStateAction } from 'react';
 
 // --- SVG Icons ---
 const ChevronLeft = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>;
+const CheckCircle = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
 const Briefcase = () => <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>;
 const UserCircle = () => <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>;
 const Coffee = () => <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" x2="6" y1="2" y2="4"/><line x1="10" x2="10" y1="2" y2="4"/><line x1="14" x2="14" y1="2" y2="4"/></svg>;
@@ -28,23 +29,18 @@ interface TelegramUser {
 }
 
 interface FormData {
-  // Общие поля
   title: string;
   description: string;
   contacts: string;
-  // Вакансия
   salary: string;
   company?: string;
   location?: string;
-  // Резюме
   experience?: string;
   skills?: string;
-  // Random Coffee
   rcName?: string;
   rcSpecialty?: string;
   rcInterests?: string;
   rcLinkedin?: string;
-  
   [key: string]: string | undefined;
 }
 
@@ -59,7 +55,6 @@ const CHAR_LIMITS: Record<string, number> = {
     skills: 500,
     description: 3000,
     contacts: 200,
-    // RC limits
     rcName: 100,
     rcSpecialty: 100,
     rcInterests: 500,
@@ -127,7 +122,6 @@ const getLabel = (field: string, activeTab: string) => {
         skills: 'Ключевые навыки',
         description: 'Описание',
         contacts: 'Контакты',
-        // RC
         rcName: 'Ваше Имя',
         rcSpecialty: 'Специальность',
         rcInterests: 'Профессиональные интересы',
@@ -310,13 +304,18 @@ const Step3Channels = ({ channels, selectedIds, setSelectedIds }: { channels: Ch
     );
 };
 
-const Step4Preview = ({ activeTab, formData }: { activeTab: 'VACANCY' | 'RESUME' | 'RANDOM_COFFEE', formData: FormData }) => {
+const Step4Preview = ({ activeTab, formData, isParticipating }: { activeTab: 'VACANCY' | 'RESUME' | 'RANDOM_COFFEE', formData: FormData, isParticipating: boolean }) => {
     const rawText = formatOrderText(activeTab, formData);
     const htmlContent = rawText.replace(/\n/g, '<br/>');
 
     if (activeTab === 'RANDOM_COFFEE') {
         return (
             <div className="space-y-6">
+                {isParticipating && (
+                    <div className="bg-green-100 border border-green-200 text-green-800 p-4 rounded-xl text-sm font-bold flex items-center gap-2">
+                        <CheckCircle /> Вы уже участвуете в эту пятницу!
+                    </div>
+                )}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-orange-100 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-400 to-yellow-400"></div>
                     <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
@@ -397,6 +396,9 @@ export default function TgAppPage() {
     company: '', location: '', experience: '', skills: '',
     rcName: '', rcSpecialty: '', rcInterests: '', rcLinkedin: ''
   });
+  
+  // Добавляем стейт участия
+  const [isParticipating, setIsParticipating] = useState(false);
 
   // Загрузка
   useEffect(() => {
@@ -420,11 +422,6 @@ export default function TgAppPage() {
              const target = data.find((c: Channel) => c.id === startParam || c.username.replace('@', '') === startParam);
              if (target) setSelectedIds([target.id]);
           }
-
-          // Если выбрали Random Coffee, пробуем подгрузить профиль
-          // Здесь можно сделать отдельный fetch, но пока для простоты оставим пустым
-          // или добавим логику загрузки профиля, если это критично.
-          // В идеале: fetch('/api/tg-jobs?action=get_profile&userId=' + tg.initDataUnsafe.user.id)
         }
       } catch (e) { console.error(e); }
       setLoading(false);
@@ -438,14 +435,17 @@ export default function TgAppPage() {
           fetch(`/api/tg-jobs?action=get_profile&userId=${tgUser.id}`)
             .then(res => res.json())
             .then(data => {
-                if (data && data.profile) {
-                    setFormData(prev => ({
-                        ...prev,
-                        rcName: data.profile.name || '',
-                        rcSpecialty: data.profile.specialty || '',
-                        rcInterests: data.profile.interests || '',
-                        rcLinkedin: data.profile.linkedin || ''
-                    }));
+                if (data) {
+                    setIsParticipating(data.isParticipating);
+                    if (data.profile) {
+                        setFormData(prev => ({
+                            ...prev,
+                            rcName: data.profile.name || '',
+                            rcSpecialty: data.profile.specialty || '',
+                            rcInterests: data.profile.interests || '',
+                            rcLinkedin: data.profile.linkedin || ''
+                        }));
+                    }
                 }
             })
             .catch(e => console.error("Profile load error", e));
@@ -541,6 +541,27 @@ export default function TgAppPage() {
     }
   };
 
+  // Обработка отмены
+  const handleCancel = async () => {
+      window.Telegram?.WebApp?.showConfirm('Вы уверены, что хотите отменить участие? Мы вернем вам 100 звезд.', async (confirmed: boolean) => {
+          if (confirmed) {
+              try {
+                  const res = await fetch('/api/tg-jobs', {
+                      method: 'POST',
+                      body: JSON.stringify({ action: 'cancel_random_coffee', userId: tgUser?.id || '12345' }),
+                  });
+                  const data = await res.json();
+                  if (data.ok) {
+                      setIsParticipating(false);
+                      window.Telegram?.WebApp?.showAlert('Участие отменено, средства возвращены.');
+                  } else {
+                      alert('Ошибка отмены: ' + (data.error || 'Unknown'));
+                  }
+              } catch { alert('Ошибка соединения'); }
+          }
+      });
+  };
+
   // Main Render
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Загрузка...</div>;
 
@@ -599,7 +620,7 @@ export default function TgAppPage() {
                     <h2 className="text-xl font-bold mb-4 px-1">
                         {activeTab === 'RANDOM_COFFEE' ? 'Подтверждение' : 'Проверка'}
                     </h2>
-                    <Step4Preview activeTab={activeTab} formData={formData} />
+                    <Step4Preview activeTab={activeTab} formData={formData} isParticipating={isParticipating} />
                 </>
             )}
         </div>
@@ -615,19 +636,13 @@ export default function TgAppPage() {
                         </div>
                     )}
                     
-                    <button
-                        onClick={step === 4 ? handlePay : goNext}
-                        disabled={step === 3 && activeTab !== 'RANDOM_COFFEE' && totalPrice === 0}
-                        className={`
-                            bg-blue-600 text-white font-bold py-3 px-6 rounded-xl transition active:scale-95 shadow-lg shadow-blue-200
-                            ${(step === 3 || step === 4) ? 'w-auto px-8' : 'w-full'}
-                            disabled:opacity-50 disabled:cursor-not-allowed
-                        `}
-                    >
-                        {step === 4 
-                            ? (activeTab === 'RANDOM_COFFEE' ? `Участвовать (⭐️ ${totalPrice})` : `Оплатить ⭐️ ${totalPrice}`) 
-                            : 'Далее'}
-                    </button>
+                    {step === 4 && activeTab === 'RANDOM_COFFEE' && isParticipating ? (
+                        <button onClick={handleCancel} className="w-full bg-red-50 text-red-600 border border-red-200 font-bold py-3 px-6 rounded-xl transition active:scale-95 shadow-lg">Отменить участие и вернуть 100 ⭐️</button>
+                    ) : (
+                        <button onClick={step === 4 ? handlePay : goNext} disabled={step === 3 && activeTab !== 'RANDOM_COFFEE' && totalPrice === 0} className={`bg-blue-600 text-white font-bold py-3 px-6 rounded-xl transition active:scale-95 shadow-lg shadow-blue-200 ${(step === 3 || step === 4) ? 'w-auto px-8' : 'w-full'} disabled:opacity-50 disabled:cursor-not-allowed`}>
+                            {step === 4 ? (activeTab === 'RANDOM_COFFEE' ? `Участвовать (⭐️ ${totalPrice})` : `Оплатить ⭐️ ${totalPrice}`) : 'Далее'}
+                        </button>
+                    )}
                 </div>
             </div>
         )}

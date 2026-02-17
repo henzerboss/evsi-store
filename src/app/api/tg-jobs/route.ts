@@ -23,7 +23,8 @@ function getNextFriday() {
     const day = d.getDay();
     const diff = 5 - day; 
     
-    // ИСПРАВЛЕНИЕ: Используем const, так как значение не меняется
+    // Если сегодня пятница и уже прошло 10 утра (распределение), то берем следующую
+    // Для простоты, если сегодня пятница, считаем следующую
     const daysToAdd = diff <= 0 ? diff + 7 : diff;
     
     d.setDate(d.getDate() + daysToAdd);
@@ -42,9 +43,24 @@ export async function GET(req: Request) {
           const profile = await prisma.randomCoffeeProfile.findUnique({
               where: { telegramUserId: String(userId) }
           });
-          return NextResponse.json({ profile });
+
+          // Проверяем, участвует ли уже в ближайшей пятнице
+          let isParticipating = false;
+          if (profile) {
+              const nextFriday = getNextFriday();
+              const participation = await prisma.randomCoffeeParticipation.findFirst({
+                  where: {
+                      profileId: profile.id,
+                      matchDate: nextFriday,
+                      status: 'PAID'
+                  }
+              });
+              if (participation) isParticipating = true;
+          }
+
+          return NextResponse.json({ profile, isParticipating });
       } catch {
-          return NextResponse.json({ profile: null });
+          return NextResponse.json({ profile: null, isParticipating: false });
       }
   }
 
@@ -61,6 +77,45 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json();
+
+  // --- ОТМЕНА УЧАСТИЯ И ВОЗВРАТ ---
+  if (body.action === 'cancel_random_coffee') {
+      const { userId } = body;
+      const nextFriday = getNextFriday();
+
+      // Ищем активную запись
+      const participation = await prisma.randomCoffeeParticipation.findFirst({
+          where: {
+              profile: { telegramUserId: String(userId) },
+              matchDate: nextFriday,
+              status: 'PAID'
+          },
+          include: { profile: true }
+      });
+
+      if (!participation || !participation.telegramPaymentChargeId) {
+           return NextResponse.json({ error: 'No active participation found' }, { status: 400 });
+      }
+
+      // Делаем возврат звезд
+      const refundRes = await telegramRequest('refundStarPayment', {
+          user_id: parseInt(participation.profile.telegramUserId),
+          telegram_payment_charge_id: participation.telegramPaymentChargeId
+      });
+
+      if (!refundRes.ok) {
+           console.error('Refund failed', refundRes);
+           return NextResponse.json({ error: 'Refund failed' }, { status: 500 });
+      }
+
+      // Обновляем статус в БД
+      await prisma.randomCoffeeParticipation.update({
+          where: { id: participation.id },
+          data: { status: 'REFUNDED_BY_USER' }
+      });
+
+      return NextResponse.json({ ok: true });
+  }
 
   // 1. Создание инвойса
   if (body.action === 'create_invoice') {
@@ -113,7 +168,6 @@ export async function POST(req: Request) {
     const tgResponse = await telegramRequest('createInvoiceLink', invoiceData);
     
     if (!tgResponse.ok) {
-        console.error('Invoice Error:', tgResponse);
         return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 });
     }
 
@@ -144,12 +198,10 @@ export async function POST(req: Request) {
       }
     });
 
-    // --- ЛОГИКА ДЛЯ RANDOM COFFEE ---
     if (updatedOrder.type === 'RANDOM_COFFEE') {
         const data = JSON.parse(updatedOrder.payload);
         const userId = updatedOrder.telegramUserId;
 
-        // 1. Создаем или обновляем профиль
         const profile = await prisma.randomCoffeeProfile.upsert({
             where: { telegramUserId: userId },
             update: {
@@ -167,7 +219,6 @@ export async function POST(req: Request) {
             }
         });
 
-        // 2. Записываем на пятницу
         const nextFriday = getNextFriday();
         await prisma.randomCoffeeParticipation.create({
             data: {
@@ -178,7 +229,6 @@ export async function POST(req: Request) {
             }
         });
 
-        // 3. Отправляем подтверждение
         const dateStr = nextFriday.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
         await telegramRequest('sendMessage', {
             chat_id: body.message.chat.id,
@@ -189,13 +239,14 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true });
     }
     
-    // --- ЛОГИКА ДЛЯ ВАКАНСИЙ/РЕЗЮМЕ ---
+    // Стандартная логика для вакансий...
     await telegramRequest('sendMessage', {
         chat_id: body.message.chat.id,
-        text: `✅ <b>Оплата прошла успешно!</b>\n\nВаша заявка отправлена на модерацию.\n\n⏳ <b>Модерация занимает до 24 часов.</b>\n📢 Публикация происходит ежедневно с 09:00 до 20:00 МСК.\n\nМы пришлем вам ссылки на посты сразу после публикации.`,
+        text: `✅ <b>Оплата прошла успешно!</b>\n\nВаша заявка отправлена на модерацию.\n\n⏳ <b>Модерация занимает до 24 часов.</b>\n📢 Публикация происходит ежедневно с 09:00 до 20:00 МСК.`,
         parse_mode: 'HTML'
     });
 
+    // Уведомление админу
     const adminChatId = process.env.TELEGRAM_ADMIN_ID;
     if (adminChatId) {
         try {
