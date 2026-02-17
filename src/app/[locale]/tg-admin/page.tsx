@@ -10,7 +10,7 @@ import { SignOutButton } from "@/components/sign-out-button";
 const prisma = new PrismaClient();
 
 // Локальные типы
-type TgOrderType = 'VACANCY' | 'RESUME';
+type TgOrderType = 'VACANCY' | 'RESUME' | 'RANDOM_COFFEE';
 
 interface TgChannel {
   id: string;
@@ -37,7 +37,6 @@ interface TgOrder {
   channels: TgOrderChannel[];
 }
 
-// Интерфейс ответа Telegram при отправке сообщения
 interface TelegramMessageResponse {
     result?: {
         message_id: number;
@@ -66,7 +65,7 @@ async function moderateOrder(formData: FormData) {
   }
 
   if (action === 'approve') {
-    const text = formatOrderText(order.type, order.payload);
+    const text = formatOrderText(order.type as 'VACANCY' | 'RESUME', order.payload);
     const publishedLinks: string[] = [];
     
     // Публикация и сбор ссылок
@@ -79,7 +78,6 @@ async function moderateOrder(formData: FormData) {
            });
 
            if (res.ok && res.result) {
-               // Формируем ссылку: https://t.me/username/message_id
                const channelUser = item.channel.username.replace('@', '');
                publishedLinks.push(`https://t.me/${channelUser}/${res.result.message_id}`);
            }
@@ -137,7 +135,11 @@ export default async function TgAdminPage() {
   if (!session) redirect('/login');
 
   const rawPendingOrders = await prisma.tgOrder.findMany({
-    where: { status: 'PAID_WAITING_MODERATION' },
+    where: { 
+        status: 'PAID_WAITING_MODERATION',
+        // ИСПРАВЛЕНИЕ: Исключаем Random Coffee из этого списка, так как для него есть отдельная страница
+        type: { not: 'RANDOM_COFFEE' } 
+    },
     orderBy: { createdAt: 'asc' },
     include: { channels: { include: { channel: true } } }
   });
@@ -154,12 +156,13 @@ export default async function TgAdminPage() {
       {pendingOrders.length === 0 ? (
         <div className="p-10 text-center bg-gray-50 rounded-xl border border-dashed">
             <p className="text-gray-500">Нет заявок на проверку 🎉</p>
+            <p className="text-sm text-gray-400 mt-2">Участники Random Coffee находятся в отдельном разделе.</p>
         </div>
       ) : (
         <div className="space-y-8">
           {pendingOrders.map((order) => {
             const payload = JSON.parse(order.payload);
-            const formattedText = formatOrderText(order.type, payload);
+            const formattedText = formatOrderText(order.type as 'VACANCY' | 'RESUME', payload);
 
             return (
               <div key={order.id} className="bg-white border rounded-xl shadow-sm overflow-hidden">

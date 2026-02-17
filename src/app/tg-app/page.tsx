@@ -455,13 +455,20 @@ export default function TgAppPage() {
   // Валидация
   const validateForm = () => {
       let required: string[] = [];
-      
-      if (activeTab === 'VACANCY' || activeTab === 'RESUME') {
+      let currentTabFields: string[] = [];
+
+      if (activeTab === 'VACANCY') {
           required = ['title', 'description', 'contacts'];
+          currentTabFields = ['title', 'company', 'salary', 'location', 'description', 'contacts'];
+      } else if (activeTab === 'RESUME') {
+          required = ['title', 'description', 'contacts'];
+          currentTabFields = ['title', 'salary', 'experience', 'skills', 'description', 'contacts'];
       } else if (activeTab === 'RANDOM_COFFEE') {
           required = ['rcName', 'rcSpecialty', 'rcInterests'];
+          currentTabFields = ['rcName', 'rcSpecialty', 'rcInterests', 'rcLinkedin'];
       }
 
+      // 1. Обязательные поля
       for (const field of required) {
           if (!formData[field as keyof FormData]?.trim()) {
               window.Telegram?.WebApp?.showAlert(`Поле "${getLabel(field, activeTab)}" обязательно для заполнения`);
@@ -469,7 +476,17 @@ export default function TgAppPage() {
           }
       }
 
-      // Доп проверки для вакансий/резюме
+      // 2. Лимиты конкретных полей (Только для текущей вкладки)
+      for (const field of currentTabFields) {
+          const limit = CHAR_LIMITS[field];
+          const val = formData[field as keyof FormData];
+          if (limit && (val?.length || 0) > limit) {
+              window.Telegram?.WebApp?.showAlert(`Поле "${getLabel(field, activeTab)}" превышает лимит (${val?.length}/${limit}). Сократите текст.`);
+              return false;
+          }
+      }
+
+      // 3. Контакты
       if (activeTab !== 'RANDOM_COFFEE') {
           const contactRegex = /(@[\w\d_]+|https?:\/\/[^\s]+|[\w\d._%+-]+@[\w\d.-]+\.[\w]{2,4})/i;
           if (!contactRegex.test(formData.contacts)) {
@@ -478,10 +495,11 @@ export default function TgAppPage() {
           }
       }
 
-      // Общая длина
-      const totalLen = Object.values(formData).reduce((acc, val) => acc + (val?.length || 0), 0);
-      if (totalLen > MAX_TOTAL_CHARS) {
-           window.Telegram?.WebApp?.showAlert(`Общий размер текста слишком большой (${totalLen}/${MAX_TOTAL_CHARS}). Сократите описание.`);
+      // 4. Общая длина (на всякий случай, если предыдущие проверки прошли)
+      // Считаем только для полей текущей вкладки, чтобы мусор из других табов не мешал
+      const currentTabTotalLen = currentTabFields.reduce((acc, field) => acc + (formData[field as keyof FormData]?.length || 0), 0);
+      if (currentTabTotalLen > MAX_TOTAL_CHARS) {
+           window.Telegram?.WebApp?.showAlert(`Общий размер текста слишком большой (${currentTabTotalLen}/${MAX_TOTAL_CHARS}). Сократите описание.`);
            return false;
       }
 

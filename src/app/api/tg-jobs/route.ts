@@ -198,6 +198,9 @@ export async function POST(req: Request) {
       }
     });
 
+    const adminChatId = process.env.TELEGRAM_ADMIN_ID;
+
+    // --- ЛОГИКА ДЛЯ RANDOM COFFEE ---
     if (updatedOrder.type === 'RANDOM_COFFEE') {
         const data = JSON.parse(updatedOrder.payload);
         const userId = updatedOrder.telegramUserId;
@@ -229,6 +232,7 @@ export async function POST(req: Request) {
             }
         });
 
+        // Уведомление пользователю
         const dateStr = nextFriday.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
         await telegramRequest('sendMessage', {
             chat_id: body.message.chat.id,
@@ -236,24 +240,49 @@ export async function POST(req: Request) {
             parse_mode: 'HTML'
         });
 
+        // Уведомление Админу (Random Coffee)
+        if (adminChatId) {
+            try {
+                await telegramRequest('sendMessage', {
+                    chat_id: adminChatId,
+                    text: `☕️ <b>Новый участник Random Coffee!</b>\n\n` +
+                          `<b>Пользователь:</b> @${updatedOrder.telegramUsername || updatedOrder.telegramUserId}\n` +
+                          `<b>Сумма:</b> ${updatedOrder.totalAmount} ⭐️\n` +
+                          `<b>ID заказа:</b> <code>${updatedOrder.id}</code>`,
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [[{ text: "Перейти в RC админку", url: "https://evsi.store/ru/tg-admin/random-coffee" }]]
+                    }
+                });
+            } catch (e) {}
+        }
+
         return NextResponse.json({ ok: true });
     }
     
-    // Стандартная логика для вакансий...
+    // --- ЛОГИКА ДЛЯ ВАКАНСИЙ/РЕЗЮМЕ ---
     await telegramRequest('sendMessage', {
         chat_id: body.message.chat.id,
-        text: `✅ <b>Оплата прошла успешно!</b>\n\nВаша заявка отправлена на модерацию.\n\n⏳ <b>Модерация занимает до 24 часов.</b>\n📢 Публикация происходит ежедневно с 09:00 до 20:00 МСК.`,
+        text: `✅ <b>Оплата прошла успешно!</b>\n\nВаша заявка отправлена на модерацию.\n\n⏳ <b>Модерация занимает до 24 часов.</b>\n📢 Публикация происходит ежедневно с 09:00 до 20:00 МСК.\n\nМы пришлем вам ссылки на посты сразу после публикации.`,
         parse_mode: 'HTML'
     });
 
-    // Уведомление админу
-    const adminChatId = process.env.TELEGRAM_ADMIN_ID;
+    // Уведомление админу (Вакансии/Резюме) - Восстановлен старый формат
     if (adminChatId) {
         try {
             await telegramRequest('sendMessage', {
                 chat_id: adminChatId,
-                text: `🔥 <b>Новая оплата: ${updatedOrder.type}</b>\nUser: @${updatedOrder.telegramUsername}`,
-                parse_mode: 'HTML'
+                text: `🔥 <b>Новая заявка на модерацию!</b>\n\n` +
+                      `<b>Тип:</b> ${updatedOrder.type === 'VACANCY' ? '💼 Вакансия' : '👤 Резюме'}\n` +
+                      `<b>Пользователь:</b> @${updatedOrder.telegramUsername || updatedOrder.telegramUserId}\n` +
+                      `<b>Сумма:</b> ${updatedOrder.totalAmount} ⭐️\n` +
+                      `<b>ID заказа:</b> <code>${updatedOrder.id}</code>`,
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "Перейти в админку", url: "https://evsi.store/ru/tg-admin" }]
+                    ]
+                }
             });
         } catch (e) {}
     }
