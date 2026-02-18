@@ -97,12 +97,19 @@ const Step2Form = ({
             <div className="mb-4 relative">
             <div className="flex justify-between mb-1"><label className="text-xs font-bold text-gray-500 uppercase tracking-wide">{getLabel(fieldName, activeTab)}</label><span className={`text-xs ${isOverLimit ? 'text-red-500' : 'text-gray-300'}`}>{currentLength}/{limit}</span></div>
             {multiline ? (
-                <textarea className={`w-full p-3 bg-white border rounded-xl outline-none text-sm min-h-[140px] resize-none text-black transition-colors ${isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500'}`} placeholder={placeholder} value={formData[field] || ''} onChange={e => setFormData(prev => ({...prev, [field]: e.target.value}))} />
+                <textarea className={`w-full p-3 bg-white border rounded-xl outline-none text-sm min-h-[140px] resize-none text-black transition-colors ${isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500'}`} placeholder={placeholder} value={formData[field] || ''} onChange={e => setFormData((prev:FormData) => ({...prev, [field]: e.target.value}))} />
             ) : (
-                <input type="text" className={`w-full p-3 bg-white border rounded-xl outline-none text-sm text-black transition-colors ${isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500'}`} placeholder={placeholder} value={formData[field] || ''} onChange={e => setFormData(prev => ({...prev, [field]: e.target.value}))} />
+                <input type="text" className={`w-full p-3 bg-white border rounded-xl outline-none text-sm text-black transition-colors ${isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500'}`} placeholder={placeholder} value={formData[field] || ''} onChange={e => setFormData((prev:FormData) => ({...prev, [field]: e.target.value}))} />
             )}
             </div>
         );
+    };
+
+    const getAiButtonText = () => {
+        if (isAiLoading) return 'Улучшаем...';
+        if (aiChanges.length > 0 && !aiAvailable) return '✅ Улучшено';
+        if (aiChanges.length > 0) return '✨ Обновить AI-версию (100 ⭐️)';
+        return '✨ AI-исправление (100 ⭐️)';
     };
 
     return (
@@ -145,7 +152,7 @@ const Step2Form = ({
                         ${aiAvailable && !isAiLoading ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-lg shadow-purple-200 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}
                     `}
                 >
-                    {isAiLoading ? 'Улучшаем...' : (aiChanges.length > 0 ? '✨ Обновить AI-версию (100 ⭐️)' : '✨ AI-исправление (100 ⭐️)')}
+                    {getAiButtonText()}
                 </button>
             )}
         </div>
@@ -180,7 +187,7 @@ const Step4Preview = ({ activeTab, formData, isParticipating }: { activeTab: App
                         <CheckCircle /> Вы уже участвуете в эту пятницу!
                     </div>
                 )}
-                {/* Rich UI for RC restored */}
+                {/* Rich UI for RC */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-orange-100 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-400 to-yellow-400"></div>
                     <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
@@ -193,7 +200,7 @@ const Step4Preview = ({ activeTab, formData, isParticipating }: { activeTab: App
                         {formData.rcLinkedin && (<div><span className="text-gray-400 text-xs uppercase font-bold">LinkedIn</span><div className="text-blue-500 truncate">{formData.rcLinkedin}</div></div>)}
                     </div>
                 </div>
-                {/* Info Block for RC restored */}
+                {/* Info Block for RC */}
                 <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-sm text-orange-800">
                     <p className="font-bold mb-1">ℹ️ Как это работает:</p>
                     <ul className="list-disc list-inside space-y-1 text-xs opacity-90">
@@ -207,7 +214,7 @@ const Step4Preview = ({ activeTab, formData, isParticipating }: { activeTab: App
         );
     }
     
-    // Rich UI for Vacancy/Resume restored
+    // Rich UI for Vacancy/Resume
     return (
         <div className="space-y-6">
             <div className="bg-white p-4 rounded-tl-2xl rounded-tr-2xl rounded-br-2xl shadow-sm max-w-[90%] relative">
@@ -252,13 +259,50 @@ export default function TgAppPage() {
   const [aiChanges, setAiChanges] = useState<AIChange[]>([]);
   const [isAiLoading, setIsAiLoading] = useState(false);
 
+  // FIX: Auto-save logic triggers only for RESUME tab
+  useEffect(() => {
+      if (!tgUser?.id || activeTab !== 'RESUME') return;
+
+      const timeoutId = setTimeout(() => {
+          // Construct specific resume objects
+          const originalResume = {
+              title: originalFormData.title,
+              salary: originalFormData.salary,
+              experience: originalFormData.experience,
+              skills: originalFormData.skills,
+              description: originalFormData.description,
+              contacts: originalFormData.contacts,
+          };
+          const correctedResume = {
+              title: correctedFormData.title,
+              salary: correctedFormData.salary,
+              experience: correctedFormData.experience,
+              skills: correctedFormData.skills,
+              description: correctedFormData.description,
+              contacts: correctedFormData.contacts,
+          };
+
+          fetch('/api/tg-jobs', {
+              method: 'POST',
+              body: JSON.stringify({
+                  action: 'save_resume_draft',
+                  userId: tgUser.id,
+                  original: originalResume,
+                  corrected: correctedResume
+              })
+          }).catch(e => console.error("Auto-save failed", e));
+      }, 1000);
+
+      return () => clearTimeout(timeoutId);
+  }, [activeTab, originalFormData, correctedFormData, tgUser]);
+
   // Helper to get current form data based on context
   const getCurrentFormData = () => {
       if (activeTab === 'RESUME' && resumeMode === 'CORRECTED') return correctedFormData;
       return originalFormData;
   };
 
-  // FIX: Explicitly handle functional updates
+  // Explicitly handle functional updates
   const setCurrentFormData = (updater: FormData | ((prev: FormData) => FormData)) => {
       if (activeTab === 'RESUME' && resumeMode === 'CORRECTED') {
           setCorrectedFormData((prev) => (typeof updater === 'function' ? updater(prev) : updater));
@@ -292,7 +336,6 @@ export default function TgAppPage() {
           tg.expand(); 
           setTgUser(tg.initDataUnsafe?.user as TelegramUser);
           
-          // FIX: Restore Theme Params
           document.body.style.backgroundColor = tg.themeParams.secondary_bg_color || '#f3f4f6';
           document.body.style.color = tg.themeParams.text_color || '#000000';
 
@@ -308,26 +351,39 @@ export default function TgAppPage() {
     init();
   }, []);
 
-  // Load RC Profile
+  // Load RC Profile & Resume Drafts
   useEffect(() => {
-      if (activeTab === 'RANDOM_COFFEE' && tgUser?.id) {
+      if (tgUser?.id) {
           fetch(`/api/tg-jobs?action=get_profile&userId=${tgUser.id}`)
             .then(res => res.json())
             .then(data => {
-                if (data && data.profile) {
-                    setIsParticipating(data.isParticipating);
-                    setOriginalFormData(prev => ({
-                        ...prev,
-                        rcName: data.profile.name || '',
-                        rcSpecialty: data.profile.specialty || '',
-                        rcInterests: data.profile.interests || '',
-                        rcLinkedin: data.profile.linkedin || ''
-                    }));
+                if (data) {
+                    if (data.profile) {
+                        setIsParticipating(data.isParticipating);
+                        setOriginalFormData(prev => ({
+                            ...prev,
+                            rcName: data.profile.name || '',
+                            rcSpecialty: data.profile.specialty || '',
+                            rcInterests: data.profile.interests || '',
+                            rcLinkedin: data.profile.linkedin || ''
+                        }));
+                    }
+                    if (data.resumeDraft) {
+                        if (data.resumeDraft.original) {
+                            setOriginalFormData(prev => ({ ...prev, ...data.resumeDraft.original }));
+                        }
+                        if (data.resumeDraft.corrected) {
+                            setCorrectedFormData(prev => ({ ...prev, ...data.resumeDraft.corrected }));
+                            setResumeMode('CORRECTED'); 
+                            // Update changes view if needed, but changes aren't stored in DB in this version.
+                            // User will see "Corrected" tab but no changes list until they gen again.
+                        }
+                    }
                 }
             })
             .catch(e => console.error(e));
       }
-  }, [activeTab, tgUser]);
+  }, [tgUser]);
 
   // FIX: Better retry logic
   const pollForGeneration = async (orderId: string, attempts = 5) => {
@@ -369,7 +425,7 @@ export default function TgAppPage() {
               method: 'POST',
               body: JSON.stringify({
                   action: 'create_ai_invoice',
-                  userId: tgUser?.id || '12345', // FIX: Fallback for local testing
+                  userId: tgUser?.id || '12345',
                   username: tgUser?.username,
                   payload: originalFormData
               }),
@@ -378,23 +434,26 @@ export default function TgAppPage() {
           
           if (data.invoiceLink) {
               window.Telegram.WebApp.openInvoice(data.invoiceLink, async (status: string) => {
-                  if (status === 'paid') {
-                      window.Telegram?.WebApp?.showAlert('Оплата прошла! Генерируем улучшенную версию...');
-                      try {
-                          const genData = await pollForGeneration(data.orderId);
-                          
-                          setLastAiInputSnapshot(JSON.stringify(originalFormData));
-                          const aiRes = genData.aiResult.resume;
-                          setCorrectedFormData(prev => ({ ...prev, ...aiRes }));
-                          setAiChanges(genData.aiResult.changes);
-                          setResumeMode('CORRECTED');
-                          window.Telegram?.WebApp?.showAlert('Резюме улучшено! Проверьте вкладку "Исправленная".');
-                      } catch (e) {
-                          console.error(e);
-                          window.Telegram?.WebApp?.showAlert('Ошибка генерации (тайм-аут). Средства будут возвращены.');
+                  try { // Wrap logic in try-finally to ensure loading reset
+                      if (status === 'paid') {
+                          window.Telegram?.WebApp?.showAlert('Оплата прошла! Генерируем улучшенную версию...');
+                          try {
+                              const genData = await pollForGeneration(data.orderId);
+                              
+                              setLastAiInputSnapshot(JSON.stringify(originalFormData));
+                              const aiRes = genData.aiResult.resume;
+                              setCorrectedFormData(prev => ({ ...prev, ...aiRes }));
+                              setAiChanges(genData.aiResult.changes);
+                              setResumeMode('CORRECTED');
+                              window.Telegram?.WebApp?.showAlert('Резюме улучшено! Проверьте вкладку "Исправленная".');
+                          } catch (e) {
+                              console.error(e);
+                              window.Telegram?.WebApp?.showAlert('Ошибка генерации (тайм-аут). Средства будут возвращены.');
+                          }
                       }
+                  } finally {
+                      setIsAiLoading(false);
                   }
-                  setIsAiLoading(false);
               });
           } else {
               setIsAiLoading(false);
@@ -480,7 +539,7 @@ export default function TgAppPage() {
                   channelIds: activeTab === 'RANDOM_COFFEE' ? [] : selectedIds, 
                   type: activeTab, 
                   payload: getCurrentFormData(), 
-                  userId: tgUser?.id || '12345', // FIX: Fallback
+                  userId: tgUser?.id || '12345', 
                   username: tgUser?.username 
               }),
           });

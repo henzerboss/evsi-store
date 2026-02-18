@@ -8,6 +8,7 @@ const globalForPrisma = global as unknown as { prisma: PrismaClient };
 const prisma = globalForPrisma.prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
+// --- Interfaces ---
 interface TgChannel {
   id: string;
   priceStars: number;
@@ -16,7 +17,6 @@ interface TgChannel {
   username: string;
 }
 
-// Интерфейсы для AI
 interface ResumeData {
   title: string;
   salary: string;
@@ -37,7 +37,14 @@ interface AIResult {
   changes: AIChange[];
 }
 
-// Helper: Get next Friday
+// --- Helpers ---
+
+// Safe JSON parse helper
+const safeJson = (s?: string | null) => {
+  if (!s) return null;
+  try { return JSON.parse(s); } catch { return null; }
+};
+
 function getNextFriday() {
     const d = new Date();
     const day = d.getDay();
@@ -48,42 +55,20 @@ function getNextFriday() {
     return d;
 }
 
-// Helper: Gemini AI Call
 async function generateImprovedResume(resumeData: ResumeData): Promise<AIResult> {
     const apiKey = process.env.GEMINI_API_KEY_RESUME;
     if (!apiKey) throw new Error("API Key not configured");
 
     const prompt = `
-Ты — опытный HR, карьерный консультант и специалист по подбору персонала с 10+ лет опыта.
-Твоя задача — проверить и улучшить резюме кандидата.
+Ты — опытный HR. Проверь и улучши резюме.
+Сохраняй смысл, улучшай стиль (деловой, без воды).
+JSON формат: { "resume": { ...fields... }, "changes": [ { "field", "what_fixed", "why" } ] }
 
-ВАЖНО:
-1. Сохраняй смысл. Не выдумывай факты.
-2. Улучшай стиль, грамматику, ясность. Делай текст конкретным и деловым.
-3. Убирай воду и клише.
-4. Не используй длинное тире или спецсимволы, выдающие ИИ.
-5. Проверяй соответствие должности и опыта.
-
-ФОРМАТ JSON:
-{
-  "resume": {
-    "title": "Исправленная должность (макс 150)",
-    "salary": "Исправленная зп (макс 100)",
-    "experience": "Исправленный опыт (макс 500)",
-    "skills": "Исправленные навыки (макс 500)",
-    "description": "Исправленное описание (макс 3000)",
-    "contacts": "Исправленные контакты (макс 200)"
-  },
-  "changes": [
-    { "field": "Название поля", "what_fixed": "Что исправлено", "why": "Почему это лучше" }
-  ]
-}
-
-Данные кандидата:
-Желаемая должность: ${resumeData.title}
-Зарплатные ожидания: ${resumeData.salary}
-Опыт работы: ${resumeData.experience}
-Ключевые навыки: ${resumeData.skills}
+Данные:
+Должность: ${resumeData.title}
+ЗП: ${resumeData.salary}
+Опыт: ${resumeData.experience}
+Навыки: ${resumeData.skills}
 Описание: ${resumeData.description}
 Контакты: ${resumeData.contacts}
 `;
@@ -97,17 +82,14 @@ async function generateImprovedResume(resumeData: ResumeData): Promise<AIResult>
         })
     });
 
-    if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`Gemini API Error: ${err}`);
-    }
-
+    if (!response.ok) throw new Error(`Gemini API Error`);
     const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error("No content generated");
-    
+    if (!text) throw new Error("No content");
     return JSON.parse(text) as AIResult;
 }
+
+// --- Handlers ---
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -116,16 +98,22 @@ export async function GET(req: Request) {
 
   if (action === 'get_profile' && userId) {
       try {
-          const profile = await prisma.randomCoffeeProfile.findUnique({
+          // 1. Random Coffee Profile
+          const rcProfile = await prisma.randomCoffeeProfile.findUnique({
+              where: { telegramUserId: String(userId) }
+          });
+
+          // 2. Resume Drafts
+          const userProfile = await prisma.tgUserProfile.findUnique({
               where: { telegramUserId: String(userId) }
           });
 
           let isParticipating = false;
-          if (profile) {
+          if (rcProfile) {
               const nextFriday = getNextFriday();
               const participation = await prisma.randomCoffeeParticipation.findFirst({
                   where: {
-                      profileId: profile.id,
+                      profileId: rcProfile.id,
                       matchDate: nextFriday,
                       status: 'PAID'
                   }
@@ -133,9 +121,17 @@ export async function GET(req: Request) {
               if (participation) isParticipating = true;
           }
 
-          return NextResponse.json({ profile, isParticipating });
-      } catch {
-          return NextResponse.json({ profile: null, isParticipating: false });
+          return NextResponse.json({ 
+              profile: rcProfile, 
+              isParticipating,
+              resumeDraft: userProfile ? {
+                  original: safeJson(userProfile.resumeOriginal),
+                  corrected: safeJson(userProfile.resumeCorrected)
+              } : null
+          });
+      } catch (e) {
+          console.error(e);
+          return NextResponse.json({ profile: null, isParticipating: false, resumeDraft: null });
       }
   }
 
@@ -152,6 +148,30 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json();
+
+  // --- SAVE RESUME DRAFT ---
+  if (body.action === 'save_resume_draft') {
+      const { userId, original, corrected } = body;
+      
+      try {
+          await prisma.tgUserProfile.upsert({
+              where: { telegramUserId: String(userId) },
+              update: {
+                  resumeOriginal: original ? JSON.stringify(original) : null, // Используем null для очистки
+                  resumeCorrected: corrected ? JSON.stringify(corrected) : null
+              },
+              create: {
+                  telegramUserId: String(userId),
+                  resumeOriginal: original ? JSON.stringify(original) : null,
+                  resumeCorrected: corrected ? JSON.stringify(corrected) : null
+              }
+          });
+          return NextResponse.json({ ok: true });
+      } catch (e) {
+          console.error("Failed to save draft:", e);
+          return NextResponse.json({ error: "Failed to save" }, { status: 500 });
+      }
+  }
 
   // --- AI RESUME FIX: 1. Create Invoice ---
   if (body.action === 'create_ai_invoice') {
@@ -179,16 +199,13 @@ export async function POST(req: Request) {
 
       const tgResponse = await telegramRequest('createInvoiceLink', invoiceData);
       
-      if (!tgResponse.ok) {
-          return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 });
-      }
+      if (!tgResponse.ok) return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 });
       return NextResponse.json({ invoiceLink: tgResponse.result, orderId: order.id });
   }
 
   // --- AI RESUME FIX: 2. Generate Content ---
   if (body.action === 'generate_ai_resume') {
       const { orderId } = body;
-
       const order = await prisma.tgOrder.findUnique({ where: { id: orderId } });
       
       if (!order || order.status !== 'PAID_WAITING_MODERATION') {
@@ -199,85 +216,34 @@ export async function POST(req: Request) {
           const originalData = JSON.parse(order.payload) as ResumeData;
           const aiResult = await generateImprovedResume(originalData);
 
-          await prisma.tgOrder.update({
-              where: { id: orderId },
-              data: { status: 'PUBLISHED' }
+          await prisma.tgOrder.update({ where: { id: orderId }, data: { status: 'PUBLISHED' } });
+
+          // Save corrected draft immediately
+          await prisma.tgUserProfile.upsert({
+              where: { telegramUserId: order.telegramUserId },
+              update: { resumeCorrected: JSON.stringify(aiResult.resume) },
+              create: { telegramUserId: order.telegramUserId, resumeCorrected: JSON.stringify(aiResult.resume) }
           });
 
-          // Уведомления пользователю
+          // Notifications...
           const userId = order.telegramUserId;
-
-          // 1. Оригинал
           await telegramRequest('sendMessage', {
               chat_id: userId,
-              text: `📄 <b>Ваше оригинальное резюме:</b>\n\n` + 
-                    `<b>Должность:</b> ${originalData.title}\n` +
-                    `<b>Опыт:</b> ${originalData.experience}\n` +
-                    `<b>Навыки:</b> ${originalData.skills}\n\n` +
-                    `<i>Обработано AI</i>`,
+              text: `✨ <b>Резюме улучшено!</b>\nМы обновили данные в Mini App.\n\nПроверьте вкладку "Исправленная".`,
               parse_mode: 'HTML'
           });
-
-          // 2. Исправленное
-          const fixed = aiResult.resume;
-          await telegramRequest('sendMessage', {
-              chat_id: userId,
-              text: `✨ <b>Исправленная версия:</b>\n\n` + 
-                    `<b>Должность:</b> ${fixed.title}\n` +
-                    `<b>ЗП:</b> ${fixed.salary}\n` +
-                    `<b>Опыт:</b> ${fixed.experience}\n` +
-                    `<b>Навыки:</b> ${fixed.skills}\n` +
-                    `<b>Описание:</b> ${fixed.description}\n` +
-                    `<b>Контакты:</b> ${fixed.contacts}`,
-              parse_mode: 'HTML'
-          });
-
-          // 3. Изменения
-          let changesText = "📝 <b>Что улучшили:</b>\n\n";
-          aiResult.changes.forEach((c: AIChange) => {
-              changesText += `• <b>${c.field}:</b> ${c.what_fixed}\n  <i>${c.why}</i>\n\n`;
-          });
-          
-          await telegramRequest('sendMessage', {
-              chat_id: userId,
-              text: changesText,
-              parse_mode: 'HTML'
-          });
-
-          // Админу
-          const adminChatId = process.env.TELEGRAM_ADMIN_ID;
-          if (adminChatId) {
-              try {
-                await telegramRequest('sendMessage', {
-                    chat_id: adminChatId,
-                    text: `🤖 <b>AI Resume Fix Used!</b>\nUser: @${order.telegramUsername}\nIncome: 100 ⭐️`,
-                    parse_mode: 'HTML'
-                });
-              } catch {}
-          }
 
           return NextResponse.json({ success: true, aiResult });
 
       } catch (e: unknown) {
           console.error("AI Generation Failed:", e);
-          
           if (order.telegramPaymentChargeId) {
               await telegramRequest('refundStarPayment', {
                   user_id: parseInt(order.telegramUserId, 10),
                   telegram_payment_charge_id: order.telegramPaymentChargeId
               });
-              
-              await telegramRequest('sendMessage', {
-                  chat_id: order.telegramUserId,
-                  text: `⚠️ Произошла ошибка при генерации AI-резюме. Мы вернули вам 100 звезд. Попробуйте позже.`,
-              });
-
-              await prisma.tgOrder.update({
-                  where: { id: orderId },
-                  data: { status: 'REFUNDED' }
-              });
+              await prisma.tgOrder.update({ where: { id: orderId }, data: { status: 'REFUNDED' } });
           }
-
           return NextResponse.json({ error: 'AI Generation Failed, refunded' }, { status: 500 });
       }
   }
@@ -286,99 +252,57 @@ export async function POST(req: Request) {
   if (body.action === 'cancel_random_coffee') {
       const { userId } = body;
       const nextFriday = getNextFriday();
-
       const participation = await prisma.randomCoffeeParticipation.findFirst({
-          where: {
-              profile: { telegramUserId: String(userId) },
-              matchDate: nextFriday,
-              status: 'PAID'
-          },
+          where: { profile: { telegramUserId: String(userId) }, matchDate: nextFriday, status: 'PAID' },
           include: { profile: true }
       });
 
-      if (!participation || !participation.telegramPaymentChargeId) {
-           return NextResponse.json({ error: 'Запись не найдена или уже отменена' }, { status: 400 });
-      }
+      if (!participation || !participation.telegramPaymentChargeId) return NextResponse.json({ error: 'Запись не найдена' }, { status: 400 });
 
       const refundRes = await telegramRequest('refundStarPayment', {
           user_id: parseInt(participation.profile.telegramUserId, 10),
           telegram_payment_charge_id: participation.telegramPaymentChargeId
       });
 
-      if (!refundRes.ok) {
-           return NextResponse.json({ error: refundRes.description || 'Error' }, { status: 500 });
-      }
+      if (!refundRes.ok) return NextResponse.json({ error: refundRes.description }, { status: 500 });
 
-      await prisma.randomCoffeeParticipation.update({
-          where: { id: participation.id },
-          data: { status: 'REFUNDED_BY_USER' }
-      });
-
+      await prisma.randomCoffeeParticipation.update({ where: { id: participation.id }, data: { status: 'REFUNDED_BY_USER' } });
       return NextResponse.json({ ok: true });
   }
 
   // --- CREATE INVOICE (Standard) ---
   if (body.action === 'create_invoice') {
     const { channelIds, payload, type, userId, username } = body;
-
     let totalAmount = 0;
     
-    if (type === 'RANDOM_COFFEE') {
-        totalAmount = 100;
-    } else {
-        if (!channelIds?.length) {
-            return NextResponse.json({ error: 'Invalid data' }, { status: 400 });
-        }
-        const channels = (await prisma.tgChannel.findMany({
-            where: { id: { in: channelIds } },
-        })) as TgChannel[];
-        
+    if (type === 'RANDOM_COFFEE') totalAmount = 100;
+    else {
+        if (!channelIds?.length) return NextResponse.json({ error: 'Invalid data' }, { status: 400 });
+        const channels = (await prisma.tgChannel.findMany({ where: { id: { in: channelIds } } })) as TgChannel[];
         totalAmount = channels.reduce((sum: number, ch: TgChannel) => sum + ch.priceStars, 0);
     }
 
     const order = await prisma.tgOrder.create({
       data: {
-        telegramUserId: String(userId),
-        telegramUsername: username,
-        type: type, 
-        payload: JSON.stringify(payload),
-        totalAmount: totalAmount,
-        status: 'PENDING',
-        channels: {
-          create: type === 'RANDOM_COFFEE' 
-            ? [] 
-            : channelIds.map((id: string) => ({ channelId: id }))
-        }
+        telegramUserId: String(userId), telegramUsername: username, type: type, 
+        payload: JSON.stringify(payload), totalAmount: totalAmount, status: 'PENDING',
+        channels: { create: type === 'RANDOM_COFFEE' ? [] : channelIds.map((id: string) => ({ channelId: id })) }
       }
     });
 
-    const title = type === 'RANDOM_COFFEE' ? 'Участие в Random Coffee' : (type === 'VACANCY' ? 'Публикация вакансии' : 'Публикация резюме');
-    const description = type === 'RANDOM_COFFEE' 
-        ? `Нетворкинг в ближайшую пятницу.` 
-        : `Размещение в ${channelIds.length} канал(ах).`;
-
+    const title = type === 'RANDOM_COFFEE' ? 'Random Coffee' : (type === 'VACANCY' ? 'Вакансия' : 'Резюме');
     const invoiceData = {
-      title: title,
-      description: description,
-      payload: order.id,
-      currency: "XTR",
+      title: title, description: "Оплата услуги", payload: order.id, currency: "XTR",
       prices: [{ label: "Услуга", amount: totalAmount }],
     };
 
     const tgResponse = await telegramRequest('createInvoiceLink', invoiceData);
-    
-    if (!tgResponse.ok) {
-        return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 });
-    }
-
+    if (!tgResponse.ok) return NextResponse.json({ error: 'Failed' }, { status: 500 });
     return NextResponse.json({ invoiceLink: tgResponse.result });
   }
 
   if (body.pre_checkout_query) {
-    await telegramRequest('answerPreCheckoutQuery', {
-      pre_checkout_query_id: body.pre_checkout_query.id,
-      ok: true,
-    });
+    await telegramRequest('answerPreCheckoutQuery', { pre_checkout_query_id: body.pre_checkout_query.id, ok: true });
     return NextResponse.json({ ok: true });
   }
 
@@ -386,96 +310,34 @@ export async function POST(req: Request) {
   if (body.message?.successful_payment) {
     const payment = body.message.successful_payment;
     const orderId = payment.invoice_payload;
-    const chargeId = payment.telegram_payment_charge_id;
-
     const updatedOrder = await prisma.tgOrder.update({
       where: { id: orderId },
-      data: { 
-        status: 'PAID_WAITING_MODERATION', 
-        paymentId: payment.provider_payment_charge_id,
-        telegramPaymentChargeId: chargeId 
-      }
+      data: { status: 'PAID_WAITING_MODERATION', paymentId: payment.provider_payment_charge_id, telegramPaymentChargeId: payment.telegram_payment_charge_id }
     });
 
-    if (updatedOrder.type === 'RESUME_AI') {
-        return NextResponse.json({ ok: true });
-    }
-
-    const adminChatId = process.env.TELEGRAM_ADMIN_ID;
+    if (updatedOrder.type === 'RESUME_AI') return NextResponse.json({ ok: true });
 
     if (updatedOrder.type === 'RANDOM_COFFEE') {
         const data = JSON.parse(updatedOrder.payload);
         const userId = updatedOrder.telegramUserId;
-
         const profile = await prisma.randomCoffeeProfile.upsert({
             where: { telegramUserId: userId },
-            update: {
-                name: data.rcName,
-                specialty: data.rcSpecialty,
-                interests: data.rcInterests,
-                linkedin: data.rcLinkedin
-            },
-            create: {
-                telegramUserId: userId,
-                name: data.rcName,
-                specialty: data.rcSpecialty,
-                interests: data.rcInterests,
-                linkedin: data.rcLinkedin
-            }
+            update: { name: data.rcName, specialty: data.rcSpecialty, interests: data.rcInterests, linkedin: data.rcLinkedin },
+            create: { telegramUserId: userId, name: data.rcName, specialty: data.rcSpecialty, interests: data.rcInterests, linkedin: data.rcLinkedin }
         });
-
         const nextFriday = getNextFriday();
         await prisma.randomCoffeeParticipation.create({
-            data: {
-                profileId: profile.id,
-                matchDate: nextFriday,
-                status: 'PAID',
-                telegramPaymentChargeId: chargeId
-            }
+            data: { profileId: profile.id, matchDate: nextFriday, status: 'PAID', telegramPaymentChargeId: payment.telegram_payment_charge_id }
         });
-
-        const dateStr = nextFriday.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-        await telegramRequest('sendMessage', {
-            chat_id: body.message.chat.id,
-            text: `☕️ <b>Оплата принята! Вы в игре.</b>\n\nРаспределение пар произойдет в пятницу <b>${dateStr} в 10:00 МСК</b>.\nБот пришлет вам контакт собеседника.\n\nУдачи!`,
-            parse_mode: 'HTML'
-        });
-
-        if (adminChatId) {
-            try {
-                await telegramRequest('sendMessage', {
-                    chat_id: adminChatId,
-                    text: `☕️ <b>Новый участник Random Coffee!</b>\nUser: @${updatedOrder.telegramUsername}`,
-                    parse_mode: 'HTML',
-                    reply_markup: { inline_keyboard: [[{ text: "RC Admin", url: "https://evsi.store/ru/tg-admin/random-coffee" }]] }
-                });
-            } catch (e) {}
-        }
-        return NextResponse.json({ ok: true });
+        await telegramRequest('sendMessage', { chat_id: body.message.chat.id, text: `☕️ <b>Оплата принята!</b> Вы в игре.`, parse_mode: 'HTML' });
+    } else {
+        await telegramRequest('sendMessage', { chat_id: body.message.chat.id, text: `✅ <b>Оплата прошла успешно!</b> Заявка на модерации.`, parse_mode: 'HTML' });
     }
     
-    // Стандартные вакансии/резюме
-    await telegramRequest('sendMessage', {
-        chat_id: body.message.chat.id,
-        text: `✅ <b>Оплата прошла успешно!</b>\n\nВаша заявка отправлена на модерацию.\n\n⏳ <b>Модерация занимает до 24 часов.</b>\n📢 Публикация происходит ежедневно с 09:00 до 20:00 МСК.`,
-        parse_mode: 'HTML'
-    });
-
+    // Admin notify
+    const adminChatId = process.env.TELEGRAM_ADMIN_ID;
     if (adminChatId) {
-        try {
-            await telegramRequest('sendMessage', {
-                chat_id: adminChatId,
-                text: `🔥 <b>Новая заявка на модерацию!</b>\n\n` +
-                      `<b>Тип:</b> ${updatedOrder.type === 'VACANCY' ? '💼 Вакансия' : '👤 Резюме'}\n` +
-                      `<b>Пользователь:</b> @${updatedOrder.telegramUsername}\n` +
-                      `<b>Сумма:</b> ${updatedOrder.totalAmount} ⭐️\n` +
-                      `<b>ID:</b> <code>${updatedOrder.id}</code>`,
-                parse_mode: 'HTML',
-                reply_markup: {
-                    inline_keyboard: [[{ text: "Перейти в админку", url: "https://evsi.store/ru/tg-admin" }]]
-                }
-            });
-        } catch (e) {}
+        telegramRequest('sendMessage', { chat_id: adminChatId, text: `🔥 <b>Paid: ${updatedOrder.type}</b> @${updatedOrder.telegramUsername}`, parse_mode: 'HTML' }).catch(() => {});
     }
 
     return NextResponse.json({ ok: true });

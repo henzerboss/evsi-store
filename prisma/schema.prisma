@@ -129,3 +129,15 @@ model RandomCoffeeHistory {
 
   @@unique([userAId, userBId]) // Чтобы быстро проверять, были ли они уже вместе
 }
+
+// Новая модель для хранения профиля пользователя и черновиков
+model TgUserProfile {
+  id             String   @id @default(cuid())
+  telegramUserId String   @unique
+  
+  // Черновики резюме (храним как JSON строки)
+  resumeOriginal  String? 
+  resumeCorrected String?
+  
+  updatedAt      DateTime @updatedAt
+}
