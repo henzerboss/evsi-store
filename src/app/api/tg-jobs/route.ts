@@ -39,13 +39,11 @@ interface AIResult {
 
 // --- Helpers ---
 
-// Safe JSON parse helper
 const safeJson = (s?: string | null) => {
   if (!s) return null;
   try { return JSON.parse(s); } catch { return null; }
 };
 
-// HTML Sanitizer for Telegram messages
 function sanitizeForHtml(str: string | undefined | null): string {
   if (!str) return '';
   return String(str)
@@ -68,14 +66,56 @@ async function generateImprovedResume(resumeData: ResumeData): Promise<AIResult>
     const apiKey = process.env.GEMINI_API_KEY_RESUME;
     if (!apiKey) throw new Error("API Key not configured");
 
-    // Усиленный промпт для предотвращения [object Object]
     const prompt = `
-Ты — опытный HR. Твоя задача — улучшить резюме.
+Ты — опытный HR, карьерный консультант и специалист по подбору персонала с 10+ лет опыта.
+
+
+
+Твоя задача — проверить и улучшить резюме кандидата так, чтобы оно соответствовало лучшим практикам оформления, было привлекательным для рекрутеров, HR и ATS-систем.
+
+
 
 ВАЖНО:
-1. "contacts" должно быть ОБЫЧНОЙ СТРОКОЙ (например: "@user, +7999..."), а не объектом или массивом.
-2. Не выдумывай факты, сохраняй смысл.
-3. Стиль деловой, без воды.
+
+1. Сохраняй смысл информации кандидата. Не выдумывай факты, опыт, навыки или достижения.
+2. Улучшай стиль, грамматику, ясность и профессиональность.
+3. Делай текст более конкретным, структурированным и ориентированным на результат.
+4. Убирай воду, клише, разговорные выражения и повторения.
+5. Используй уверенный, деловой и естественный стиль.
+6. Проверяй орфографию, пунктуацию и логичность.
+7. Не используй длинное тире, специальные символы или другие признаки, которые могут указывать на использование ИИ. Используй только обычные знаки препинания.
+8. Текст должен выглядеть так, как будто его написал человек.
+9. Не добавляй искусственных или чрезмерно «продающих» формулировок.
+
+СООТВЕТСТВИЕ:
+
+10. Проверь соответствие между:
+
+   - желаемой должностью,
+   - опытом работы,
+   - ключевыми навыками,
+   - описанием кандидата.
+
+11. Если есть несоответствия, исправь формулировки так, чтобы все поля логично дополняли друг друга.
+12. Убедись, что навыки и опыт релевантны заявленной должности.
+13. Если должность слишком общая, сделай её более конкретной, но без выдумывания.
+
+
+КЛЮЧЕВЫЕ НАВЫКИ:
+
+14. Навыки нельзя выдумывать.
+
+15. Можно аккуратно дополнить список навыков только если:
+   - это очевидно из опыта или описания,
+   - это базовые и логично вытекающие навыки,
+   - они критически важны для профессии.
+
+16. Не добавляй редкие, сложные или узкоспециализированные навыки, если кандидат их явно не упоминает.
+
+ATS:
+
+17. Используй ключевые слова профессии.
+18. Делай текст понятным для автоматических систем отбора.
 
 ФОРМАТ JSON (СТРОГО):
 {
@@ -132,12 +172,10 @@ export async function GET(req: Request) {
 
   if (action === 'get_profile' && userId) {
       try {
-          // 1. Random Coffee Profile
           const rcProfile = await prisma.randomCoffeeProfile.findUnique({
               where: { telegramUserId: String(userId) }
           });
 
-          // 2. Resume Drafts
           const userProfile = await prisma.tgUserProfile.findUnique({
               where: { telegramUserId: String(userId) }
           });
@@ -186,7 +224,6 @@ export async function POST(req: Request) {
   // --- SAVE RESUME DRAFT ---
   if (body.action === 'save_resume_draft') {
       const { userId, original, corrected } = body;
-      
       try {
           await prisma.tgUserProfile.upsert({
               where: { telegramUserId: String(userId) },
@@ -207,10 +244,9 @@ export async function POST(req: Request) {
       }
   }
 
-  // --- AI RESUME FIX: 1. Create Invoice ---
+  // --- AI RESUME FIX: Create Invoice ---
   if (body.action === 'create_ai_invoice') {
       const { userId, payload } = body;
-      
       const order = await prisma.tgOrder.create({
           data: {
               telegramUserId: String(userId),
@@ -237,7 +273,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ invoiceLink: tgResponse.result, orderId: order.id });
   }
 
-  // --- AI RESUME FIX: 2. Generate Content ---
+  // --- AI RESUME FIX: Generate Content ---
   if (body.action === 'generate_ai_resume') {
       const { orderId } = body;
       const order = await prisma.tgOrder.findUnique({ where: { id: orderId } });
@@ -252,18 +288,15 @@ export async function POST(req: Request) {
 
           await prisma.tgOrder.update({ where: { id: orderId }, data: { status: 'PUBLISHED' } });
 
-          // Save corrected draft immediately
           await prisma.tgUserProfile.upsert({
               where: { telegramUserId: order.telegramUserId },
               update: { resumeCorrected: JSON.stringify(aiResult.resume) },
               create: { telegramUserId: order.telegramUserId, resumeCorrected: JSON.stringify(aiResult.resume) }
           });
 
-          // --- Notifications (With Sanitization!) ---
           const userId = order.telegramUserId;
-
           try {
-            // 1. Оригинал
+            // Notifications
             await telegramRequest('sendMessage', {
                 chat_id: userId,
                 text: `📄 <b>Ваше оригинальное резюме:</b>\n\n` + 
@@ -274,7 +307,6 @@ export async function POST(req: Request) {
                 parse_mode: 'HTML'
             });
 
-            // 2. Исправленное
             const fixed = aiResult.resume;
             await telegramRequest('sendMessage', {
                 chat_id: userId,
@@ -288,7 +320,6 @@ export async function POST(req: Request) {
                 parse_mode: 'HTML'
             });
 
-            // 3. Изменения
             let changesText = "📝 <b>Что улучшили:</b>\n\n";
             aiResult.changes.forEach((c: AIChange) => {
                 changesText += `• <b>${sanitizeForHtml(c.field)}:</b> ${sanitizeForHtml(c.what_fixed)}\n  <i>${sanitizeForHtml(c.why)}</i>\n\n`;
@@ -299,12 +330,10 @@ export async function POST(req: Request) {
                 text: changesText,
                 parse_mode: 'HTML'
             });
-          } catch (notifyError) {
-              console.error("Failed to send telegram notifications:", notifyError);
-              // Не фейлим весь процесс, если сообщение не ушло, данные уже сохранены
+          } catch (e) {
+              console.error("Failed to send notifications", e);
           }
 
-          // Админу
           const adminChatId = process.env.TELEGRAM_ADMIN_ID;
           if (adminChatId) {
               try {
@@ -335,33 +364,44 @@ export async function POST(req: Request) {
       }
   }
 
-  // ... (Остальной код CANCEL, CREATE INVOICE, PAYMENT SUCCESS без изменений) ...
-  // Чтобы не дублировать код, я оставляю нижнюю часть файла такой же, как в предыдущем ответе.
-  // Главное - исправления выше в generate_ai_resume и generateImprovedResume.
-
   // --- CANCEL RANDOM COFFEE ---
   if (body.action === 'cancel_random_coffee') {
       const { userId } = body;
       const nextFriday = getNextFriday();
+
       const participation = await prisma.randomCoffeeParticipation.findFirst({
-          where: { profile: { telegramUserId: String(userId) }, matchDate: nextFriday, status: 'PAID' },
+          where: {
+              profile: { telegramUserId: String(userId) },
+              matchDate: nextFriday,
+              status: 'PAID'
+          },
           include: { profile: true }
       });
 
-      if (!participation || !participation.telegramPaymentChargeId) return NextResponse.json({ error: 'Запись не найдена' }, { status: 400 });
+      if (!participation || !participation.telegramPaymentChargeId) {
+           return NextResponse.json({ error: 'Запись не найдена или уже отменена' }, { status: 400 });
+      }
 
       const refundRes = await telegramRequest('refundStarPayment', {
           user_id: parseInt(participation.profile.telegramUserId, 10),
           telegram_payment_charge_id: participation.telegramPaymentChargeId
       });
 
-      if (!refundRes.ok) return NextResponse.json({ error: refundRes.description }, { status: 500 });
+      if (!refundRes.ok) {
+           console.error("Refund failed:", refundRes);
+           // Возвращаем детальную ошибку
+           return NextResponse.json({ error: refundRes.description || 'Refund failed' }, { status: 500 });
+      }
 
-      await prisma.randomCoffeeParticipation.update({ where: { id: participation.id }, data: { status: 'REFUNDED_BY_USER' } });
+      await prisma.randomCoffeeParticipation.update({
+          where: { id: participation.id },
+          data: { status: 'REFUNDED_BY_USER' }
+      });
+
       return NextResponse.json({ ok: true });
   }
 
-  // --- CREATE INVOICE (Standard) ---
+  // --- CREATE INVOICE ---
   if (body.action === 'create_invoice') {
     const { channelIds, payload, type, userId, username } = body;
     let totalAmount = 0;
@@ -408,6 +448,8 @@ export async function POST(req: Request) {
 
     if (updatedOrder.type === 'RESUME_AI') return NextResponse.json({ ok: true });
 
+    const adminChatId = process.env.TELEGRAM_ADMIN_ID;
+
     if (updatedOrder.type === 'RANDOM_COFFEE') {
         const data = JSON.parse(updatedOrder.payload);
         const userId = updatedOrder.telegramUserId;
@@ -421,13 +463,49 @@ export async function POST(req: Request) {
             data: { profileId: profile.id, matchDate: nextFriday, status: 'PAID', telegramPaymentChargeId: payment.telegram_payment_charge_id }
         });
         await telegramRequest('sendMessage', { chat_id: body.message.chat.id, text: `☕️ <b>Оплата принята!</b> Вы в игре.`, parse_mode: 'HTML' });
-    } else {
-        await telegramRequest('sendMessage', { chat_id: body.message.chat.id, text: `✅ <b>Оплата прошла успешно!</b> Заявка на модерации.`, parse_mode: 'HTML' });
+
+        if (adminChatId) {
+            try {
+                await telegramRequest('sendMessage', {
+                    chat_id: adminChatId,
+                    text: `☕️ <b>Новый участник Random Coffee!</b>\n\n` +
+                          `<b>Пользователь:</b> @${updatedOrder.telegramUsername || updatedOrder.telegramUserId}\n` +
+                          `<b>Сумма:</b> ${updatedOrder.totalAmount} ⭐️\n` +
+                          `<b>ID заказа:</b> <code>${updatedOrder.id}</code>`,
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [[{ text: "Перейти в RC админку", url: "https://evsi.store/ru/tg-admin/random-coffee" }]]
+                    }
+                });
+            } catch (e) {}
+        }
+        return NextResponse.json({ ok: true });
     }
     
-    const adminChatId = process.env.TELEGRAM_ADMIN_ID;
+    // Вакансии/Резюме
+    await telegramRequest('sendMessage', {
+        chat_id: body.message.chat.id,
+        text: `✅ <b>Оплата прошла успешно!</b>\n\nВаша заявка отправлена на модерацию.\n\n⏳ <b>Модерация занимает до 24 часов.</b>\n📢 Публикация происходит ежедневно с 09:00 до 20:00 МСК.`,
+        parse_mode: 'HTML'
+    });
+
     if (adminChatId) {
-        telegramRequest('sendMessage', { chat_id: adminChatId, text: `🔥 <b>Paid: ${updatedOrder.type}</b> @${updatedOrder.telegramUsername}`, parse_mode: 'HTML' }).catch(() => {});
+        try {
+            await telegramRequest('sendMessage', {
+                chat_id: adminChatId,
+                text: `🔥 <b>Новая заявка на модерацию!</b>\n\n` +
+                      `<b>Тип:</b> ${updatedOrder.type === 'VACANCY' ? '💼 Вакансия' : '👤 Резюме'}\n` +
+                      `<b>Пользователь:</b> @${updatedOrder.telegramUsername || updatedOrder.telegramUserId}\n` +
+                      `<b>Сумма:</b> ${updatedOrder.totalAmount} ⭐️\n` +
+                      `<b>ID заказа:</b> <code>${updatedOrder.id}</code>`,
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "Перейти в админку", url: "https://evsi.store/ru/tg-admin" }]
+                    ]
+                }
+            });
+        } catch (e) {}
     }
 
     return NextResponse.json({ ok: true });

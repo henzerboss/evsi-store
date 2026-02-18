@@ -3,7 +3,6 @@
 
 import { useEffect, useState, Dispatch, SetStateAction } from 'react';
 
-// ... (SVG и Types без изменений)
 // --- SVG Icons ---
 const ChevronLeft = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>;
 const CheckCircle = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
@@ -18,13 +17,18 @@ type ResumeMode = 'ORIGINAL' | 'CORRECTED';
 
 type Channel = { id: string; name: string; category: string; priceStars: number; username: string; };
 interface TelegramUser { id: number; first_name: string; last_name?: string; username?: string; language_code?: string; is_premium?: boolean; }
-interface FormData {
-  title: string; description: string; contacts: string; salary: string;
-  company?: string; location?: string;
-  experience?: string; skills?: string;
-  rcName?: string; rcSpecialty?: string; rcInterests?: string; rcLinkedin?: string;
-  [key: string]: string | undefined;
-}
+
+// Separate interfaces for clarity
+interface VacancyForm { title: string; company: string; salary: string; location: string; description: string; contacts: string; }
+interface ResumeForm { title: string; salary: string; experience: string; skills: string; description: string; contacts: string; }
+interface RCForm { rcName: string; rcSpecialty: string; rcInterests: string; rcLinkedin: string; }
+
+// Combined type for generic handling in sub-components
+type AnyFormData = VacancyForm | ResumeForm | RCForm;
+
+// Type for the state updater function
+type FormUpdater = (prev: AnyFormData) => AnyFormData;
+
 interface AIChange { field: string; what_fixed: string; why: string; }
 
 // --- Constants ---
@@ -35,26 +39,29 @@ const CHAR_LIMITS: Record<string, number> = {
     rcName: 100, rcSpecialty: 100, rcInterests: 500, rcLinkedin: 200
 };
 
-// ... (Helpers and Components from previous response, simplified for brevity)
+// --- Helpers ---
 function sanitize(str: string | undefined) {
   if (!str) return '';
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function formatOrderText(type: AppTab, payload: FormData): string {
+function formatOrderText(type: AppTab, payload: AnyFormData): string {
   if (type === 'VACANCY') {
-    return `<b>💼 ВАКАНСИЯ: ${sanitize(payload.title)}</b>\n\n<b>Компания:</b> ${sanitize(payload.company)}\n<b>Зарплата:</b> ${sanitize(payload.salary || 'Не указана')}\n<b>Локация/Format:</b> ${sanitize(payload.location)}\n\n${sanitize(payload.description)}\n\n<b>Контакты:</b> ${sanitize(payload.contacts)}\n\n#вакансия`;
+    const d = payload as VacancyForm;
+    return `<b>💼 ВАКАНСИЯ: ${sanitize(d.title)}</b>\n\n<b>Компания:</b> ${sanitize(d.company)}\n<b>Зарплата:</b> ${sanitize(d.salary || 'Не указана')}\n<b>Локация/Format:</b> ${sanitize(d.location)}\n\n${sanitize(d.description)}\n\n<b>Контакты:</b> ${sanitize(d.contacts)}\n\n#вакансия`;
   } else if (type === 'RESUME') {
-    return `<b>👤 РЕЗЮМЕ: ${sanitize(payload.title)}</b>\n\n<b>Опыт:</b> ${sanitize(payload.experience)}\n<b>Зарплата:</b> ${sanitize(payload.salary || 'По договоренности')}\n<b>Навыки:</b> ${sanitize(payload.skills)}\n\n${sanitize(payload.description)}\n\n<b>Контакты:</b> ${sanitize(payload.contacts)}\n\n#резюме`;
+    const d = payload as ResumeForm;
+    return `<b>👤 РЕЗЮМЕ: ${sanitize(d.title)}</b>\n\n<b>Опыт:</b> ${sanitize(d.experience)}\n<b>Зарплата:</b> ${sanitize(d.salary || 'По договоренности')}\n<b>Навыки:</b> ${sanitize(d.skills)}\n\n${sanitize(d.description)}\n\n<b>Контакты:</b> ${sanitize(d.contacts)}\n\n#резюме`;
   } else {
-      return `<b>☕️ Random Coffee: ${sanitize(payload.rcName)}</b>\n\n<b>Специальность:</b> ${sanitize(payload.rcSpecialty)}\n<b>Интересы:</b> ${sanitize(payload.rcInterests)}\n${payload.rcLinkedin ? `<b>LinkedIn:</b> ${sanitize(payload.rcLinkedin)}` : ''}\n\n<i>Ваша анкета готова к участию в пятничном нетворкинге!</i>`;
+      const d = payload as RCForm;
+      return `<b>☕️ Random Coffee: ${sanitize(d.rcName)}</b>\n\n<b>Специальность:</b> ${sanitize(d.rcSpecialty)}\n<b>Интересы:</b> ${sanitize(d.rcInterests)}\n${d.rcLinkedin ? `<b>LinkedIn:</b> ${sanitize(d.rcLinkedin)}` : ''}\n\n<i>Ваша анкета готова к участию в пятничном нетворкинге!</i>`;
   }
 }
 
-const getLabel = (field: string, activeTab: string) => {
+const getLabel = (field: string) => {
     const labels: Record<string, string> = {
-        title: activeTab === 'VACANCY' ? 'Должность' : 'Желаемая должность',
-        company: 'Компания', salary: activeTab === 'VACANCY' ? 'Зарплата' : 'Зарплатные ожидания',
+        title: 'Должность',
+        company: 'Компания', salary: 'Зарплата',
         location: 'Локация / Формат', experience: 'Опыт работы', skills: 'Ключевые навыки',
         description: 'Описание', contacts: 'Контакты',
         rcName: 'Ваше Имя', rcSpecialty: 'Специальность', rcInterests: 'Профессиональные интересы', rcLinkedin: 'Ссылка на LinkedIn'
@@ -62,7 +69,8 @@ const getLabel = (field: string, activeTab: string) => {
     return labels[field] || field;
 };
 
-// ... Step1TypeSelection (same)
+// --- Sub-Components ---
+
 const Step1TypeSelection = ({ setActiveTab, goNext }: { setActiveTab: (t: AppTab) => void, goNext: () => void }) => (
     <div className="flex flex-col gap-4 mt-8">
         <button onClick={() => { setActiveTab('VACANCY'); goNext(); }} className="bg-white p-6 rounded-2xl shadow-sm border border-transparent hover:border-blue-500 transition active:scale-95 flex items-center gap-4"><div className="bg-blue-100 p-4 rounded-full text-blue-600"><Briefcase /></div><div className="text-left"><h3 className="text-lg font-bold text-gray-900">Ищу сотрудника</h3><p className="text-sm text-gray-500">Опубликовать вакансию</p></div></button>
@@ -71,37 +79,57 @@ const Step1TypeSelection = ({ setActiveTab, goNext }: { setActiveTab: (t: AppTab
     </div>
 );
 
-// Updated Step2Form to handle tabs persistence
 interface Step2Props {
-    formData: FormData;
-    setFormData: (updater: FormData | ((prev: FormData) => FormData)) => void;
+    data: AnyFormData;
+    setData: (updater: AnyFormData | FormUpdater) => void;
     activeTab: AppTab;
-    resumeMode: ResumeMode;
-    setResumeMode: (mode: ResumeMode) => void;
-    aiChanges: AIChange[];
-    handleAiFix: () => void;
-    isAiLoading: boolean;
-    aiAvailable: boolean;
-    hasCorrectedVersion: boolean; // New prop
+    resumeMode?: ResumeMode;
+    setResumeMode?: (mode: ResumeMode) => void;
+    aiChanges?: AIChange[];
+    handleAiFix?: () => void;
+    isAiLoading?: boolean;
+    aiAvailable?: boolean;
+    hasCorrectedVersion?: boolean;
 }
 
 const Step2Form = ({ 
-    formData, setFormData, activeTab, 
+    data, setData, activeTab, 
     resumeMode, setResumeMode, aiChanges, handleAiFix, isAiLoading, aiAvailable, hasCorrectedVersion
 }: Step2Props) => {
     
-    const renderInput = (field: keyof FormData, placeholder: string, multiline = false) => {
-        const fieldName = field as string; 
-        const currentLength = formData[field]?.length || 0;
-        const limit = CHAR_LIMITS[fieldName] || 0;
+    const renderInput = (field: string, placeholder: string, multiline = false) => {
+        // Безопасное приведение к Record для доступа по строковому ключу
+        const dataRecord = data as unknown as Record<string, string>;
+        const currentLength = dataRecord[field]?.length || 0;
+        const limit = CHAR_LIMITS[field] || 0;
         const isOverLimit = currentLength > limit;
+
+        const handleChange = (newValue: string) => {
+            // Используем FormUpdater с приведением, чтобы TypeScript понимал, что мы обновляем нужный тип
+            setData((prev: AnyFormData) => ({
+                ...prev,
+                [field]: newValue
+            } as unknown as AnyFormData));
+        };
+
         return (
             <div className="mb-4 relative">
-            <div className="flex justify-between mb-1"><label className="text-xs font-bold text-gray-500 uppercase tracking-wide">{getLabel(fieldName, activeTab)}</label><span className={`text-xs ${isOverLimit ? 'text-red-500' : 'text-gray-300'}`}>{currentLength}/{limit}</span></div>
+            <div className="flex justify-between mb-1"><label className="text-xs font-bold text-gray-500 uppercase tracking-wide">{getLabel(field)}</label><span className={`text-xs ${isOverLimit ? 'text-red-500' : 'text-gray-300'}`}>{currentLength}/{limit}</span></div>
             {multiline ? (
-                <textarea className={`w-full p-3 bg-white border rounded-xl outline-none text-sm min-h-[140px] resize-none text-black transition-colors ${isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500'}`} placeholder={placeholder} value={formData[field] || ''} onChange={e => setFormData((prev:FormData) => ({...prev, [field]: e.target.value}))} />
+                <textarea 
+                    className={`w-full p-3 bg-white border rounded-xl outline-none text-sm min-h-[140px] resize-none text-black transition-colors ${isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500'}`} 
+                    placeholder={placeholder} 
+                    value={dataRecord[field] || ''} 
+                    onChange={e => handleChange(e.target.value)} 
+                />
             ) : (
-                <input type="text" className={`w-full p-3 bg-white border rounded-xl outline-none text-sm text-black transition-colors ${isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500'}`} placeholder={placeholder} value={formData[field] || ''} onChange={e => setFormData((prev:FormData) => ({...prev, [field]: e.target.value}))} />
+                <input 
+                    type="text" 
+                    className={`w-full p-3 bg-white border rounded-xl outline-none text-sm text-black transition-colors ${isOverLimit ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:ring-2 focus:ring-blue-500'}`} 
+                    placeholder={placeholder} 
+                    value={dataRecord[field] || ''} 
+                    onChange={e => handleChange(e.target.value)} 
+                />
             )}
             </div>
         );
@@ -109,7 +137,7 @@ const Step2Form = ({
 
     return (
         <div className="space-y-4">
-            {activeTab === 'RESUME' && (hasCorrectedVersion || aiChanges.length > 0) && (
+            {activeTab === 'RESUME' && setResumeMode && (hasCorrectedVersion || (aiChanges && aiChanges.length > 0)) && (
                 <div className="flex bg-gray-200 p-1 rounded-lg mb-4">
                     <button onClick={() => setResumeMode('ORIGINAL')} className={`flex-1 py-2 text-sm font-bold rounded-md transition ${resumeMode === 'ORIGINAL' ? 'bg-white text-black shadow-sm' : 'text-gray-500'}`}>Оригинал</button>
                     <button onClick={() => setResumeMode('CORRECTED')} className={`flex-1 py-2 text-sm font-bold rounded-md transition ${resumeMode === 'CORRECTED' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500'}`}>Исправленная ✨</button>
@@ -124,7 +152,7 @@ const Step2Form = ({
                 {activeTab === 'RANDOM_COFFEE' && (<><p className="text-xs text-gray-500 mb-4 bg-orange-50 p-3 rounded-lg border border-orange-100">Данные для нетворкинга.</p>{renderInput('rcName', 'Иван')}{renderInput('rcSpecialty', 'Product Manager')}{renderInput('rcInterests', 'AI, стартапы...', true)}{renderInput('rcLinkedin', 'https://linkedin.com/...')}</>)}
             </div>
 
-            {activeTab === 'RESUME' && resumeMode === 'CORRECTED' && aiChanges.length > 0 && (
+            {activeTab === 'RESUME' && resumeMode === 'CORRECTED' && aiChanges && aiChanges.length > 0 && (
                 <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 text-sm">
                     <h4 className="font-bold text-purple-800 mb-2 flex items-center gap-2"><MagicWand /> Что улучшил AI:</h4>
                     <ul className="space-y-3">
@@ -139,7 +167,7 @@ const Step2Form = ({
                 </div>
             )}
 
-            {activeTab === 'RESUME' && (
+            {activeTab === 'RESUME' && handleAiFix && (
                 <button 
                     onClick={handleAiFix}
                     disabled={!aiAvailable || isAiLoading}
@@ -147,15 +175,15 @@ const Step2Form = ({
                         ${aiAvailable && !isAiLoading ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-lg shadow-purple-200 active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}
                     `}
                 >
-                    {isAiLoading ? 'Улучшаем...' : (hasCorrectedVersion || aiChanges.length > 0 ? '✨ Обновить AI-версию (100 ⭐️)' : '✨ AI-исправление (100 ⭐️)')}
+                    {isAiLoading ? 'Улучшаем...' : ((hasCorrectedVersion || (aiChanges && aiChanges.length > 0)) ? '✨ Обновить AI-версию (100 ⭐️)' : '✨ AI-исправление (100 ⭐️)')}
                 </button>
             )}
         </div>
     );
 };
 
-// ... Step3Channels (same)
 const Step3Channels = ({ channels, selectedIds, setSelectedIds }: { channels: Channel[], selectedIds: string[], setSelectedIds: Dispatch<SetStateAction<string[]>> }) => {
+    // Явно указываем тип аккумулятора для reduce
     const grouped = channels.reduce((acc: Record<string, Channel[]>, ch) => { 
         if (!acc[ch.category]) acc[ch.category] = []; 
         acc[ch.category].push(ch); 
@@ -165,18 +193,18 @@ const Step3Channels = ({ channels, selectedIds, setSelectedIds }: { channels: Ch
     return (
         <div className="space-y-6 pb-20">
             {Object.entries(grouped).map(([cat, list]) => (
-                <div key={cat}><h3 className="text-xs font-bold text-gray-400 uppercase mb-3 ml-1">{cat}</h3><div className="bg-white rounded-2xl overflow-hidden shadow-sm divide-y divide-gray-100">{list.map(ch => { const isSelected = selectedIds.includes(ch.id); return (<div key={ch.id} onClick={() => setSelectedIds(prev => prev.includes(ch.id) ? prev.filter(i => i !== ch.id) : [...prev, ch.id])} className={`p-4 flex items-center justify-between cursor-pointer transition active:bg-gray-50 ${isSelected ? 'bg-blue-50/50' : ''}`}><div className="flex items-center gap-3"><div className={`w-5 h-5 rounded-full border flex items-center justify-center transition ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>{isSelected && <CheckCircle />}</div><div><div className="text-sm font-medium text-gray-900">{ch.name}</div><div className="text-xs text-gray-400">{ch.username}</div></div></div><div className="text-xs font-bold bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full">⭐️ {ch.priceStars}</div></div>); })}</div></div>
+                <div key={cat}><h3 className="text-xs font-bold text-gray-400 uppercase mb-3 ml-1">{cat}</h3><div className="bg-white rounded-2xl overflow-hidden shadow-sm divide-y divide-gray-100">{list.map((ch) => { const isSelected = selectedIds.includes(ch.id); return (<div key={ch.id} onClick={() => setSelectedIds(prev => prev.includes(ch.id) ? prev.filter(i => i !== ch.id) : [...prev, ch.id])} className={`p-4 flex items-center justify-between cursor-pointer transition active:bg-gray-50 ${isSelected ? 'bg-blue-50/50' : ''}`}><div className="flex items-center gap-3"><div className={`w-5 h-5 rounded-full border flex items-center justify-center transition ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>{isSelected && <CheckCircle />}</div><div><div className="text-sm font-medium text-gray-900">{ch.name}</div><div className="text-xs text-gray-400">{ch.username}</div></div></div><div className="text-xs font-bold bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full">⭐️ {ch.priceStars}</div></div>); })}</div></div>
             ))}
         </div>
     );
 };
 
-// ... Step4Preview (same)
-const Step4Preview = ({ activeTab, formData, isParticipating }: { activeTab: AppTab, formData: FormData, isParticipating: boolean }) => {
-    const rawText = formatOrderText(activeTab, formData);
+const Step4Preview = ({ activeTab, data, isParticipating }: { activeTab: AppTab, data: AnyFormData, isParticipating: boolean }) => {
+    const rawText = formatOrderText(activeTab, data);
     const htmlContent = rawText.replace(/\n/g, '<br/>');
     
     if (activeTab === 'RANDOM_COFFEE') {
+        const rcData = data as RCForm;
         return (
             <div className="space-y-6">
                 {isParticipating && (
@@ -184,20 +212,34 @@ const Step4Preview = ({ activeTab, formData, isParticipating }: { activeTab: App
                         <CheckCircle /> Вы уже участвуете в эту пятницу!
                     </div>
                 )}
+                {/* Rich UI for RC */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-orange-100 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-400 to-yellow-400"></div>
-                    <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><span className="text-2xl">☕️</span> Карточка участника</h3>
+                    <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                        <span className="text-2xl">☕️</span> Карточка участника
+                    </h3>
                     <div className="space-y-3 text-sm">
-                        <div><span className="text-gray-400 text-xs uppercase font-bold">Имя</span><div className="text-gray-900 font-medium">{formData.rcName}</div></div>
-                        <div><span className="text-gray-400 text-xs uppercase font-bold">Специальность</span><div className="text-gray-900">{formData.rcSpecialty}</div></div>
-                        <div><span className="text-gray-400 text-xs uppercase font-bold">Интересы</span><div className="text-gray-900">{formData.rcInterests}</div></div>
-                        {formData.rcLinkedin && (<div><span className="text-gray-400 text-xs uppercase font-bold">LinkedIn</span><div className="text-blue-500 truncate">{formData.rcLinkedin}</div></div>)}
+                        <div><span className="text-gray-400 text-xs uppercase font-bold">Имя</span><div className="text-gray-900 font-medium">{rcData.rcName}</div></div>
+                        <div><span className="text-gray-400 text-xs uppercase font-bold">Специальность</span><div className="text-gray-900">{rcData.rcSpecialty}</div></div>
+                        <div><span className="text-gray-400 text-xs uppercase font-bold">Интересы</span><div className="text-gray-900">{rcData.rcInterests}</div></div>
+                        {rcData.rcLinkedin && (<div><span className="text-gray-400 text-xs uppercase font-bold">LinkedIn</span><div className="text-blue-500 truncate">{rcData.rcLinkedin}</div></div>)}
                     </div>
                 </div>
-                <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-sm text-orange-800"><p className="font-bold mb-1">ℹ️ Как это работает:</p><ul className="list-disc list-inside space-y-1 text-xs opacity-90"><li>Распределение: Ближайшая пятница 10:00 МСК</li><li>Мы подберем вам пару по интересам</li><li>Если пары не будет — вернем 100 звезд</li><li>Бот пришлет контакт собеседника в ЛС</li></ul></div>
+                {/* Info Block for RC */}
+                <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-sm text-orange-800">
+                    <p className="font-bold mb-1">ℹ️ Как это работает:</p>
+                    <ul className="list-disc list-inside space-y-1 text-xs opacity-90">
+                        <li>Распределение: Ближайшая пятница 10:00 МСК</li>
+                        <li>Мы подберем вам пару по интересам</li>
+                        <li>Если пары не будет — вернем 100 звезд</li>
+                        <li>Бот пришлет контакт собеседника в ЛС</li>
+                    </ul>
+                </div>
             </div>
         );
     }
+    
+    // Rich UI for Vacancy/Resume
     return (
         <div className="space-y-6">
             <div className="bg-white p-4 rounded-tl-2xl rounded-tr-2xl rounded-br-2xl shadow-sm max-w-[90%] relative">
@@ -205,7 +247,15 @@ const Step4Preview = ({ activeTab, formData, isParticipating }: { activeTab: App
                 <div className="text-sm text-gray-900 leading-relaxed break-words" dangerouslySetInnerHTML={{ __html: htmlContent }} />
                 <div className="text-[10px] text-gray-400 text-right mt-2">14:02</div>
             </div>
-            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-sm text-blue-800"><p className="font-bold mb-1">ℹ️ Информация:</p><ul className="list-disc list-inside space-y-1 text-xs opacity-90"><li>Модерация занимает до 24 часов</li><li>Публикация: 9:00 - 20:00 МСК</li><li>После публикации бот пришлет ссылки</li></ul></div>
+            
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-sm text-blue-800">
+                <p className="font-bold mb-1">ℹ️ Информация:</p>
+                <ul className="list-disc list-inside space-y-1 text-xs opacity-90">
+                    <li>Модерация занимает до 24 часов</li>
+                    <li>Публикация: 9:00 - 20:00 МСК</li>
+                    <li>После публикации бот пришлет ссылки</li>
+                </ul>
+            </div>
         </div>
     );
 };
@@ -219,15 +269,41 @@ export default function TgAppPage() {
   const [tgUser, setTgUser] = useState<TelegramUser | null>(null);
   const [isParticipating, setIsParticipating] = useState(false);
   
-  // Resume AI State
+  // Independent States for each form to prevent leak
+  const [vacancyForm, setVacancyForm] = useState<VacancyForm>({ title: '', company: '', salary: '', location: '', description: '', contacts: '' });
+  const [rcForm, setRcForm] = useState<RCForm>({ rcName: '', rcSpecialty: '', rcInterests: '', rcLinkedin: '' });
+  
+  // Resume State (AI)
   const [resumeMode, setResumeMode] = useState<ResumeMode>('ORIGINAL');
-  const [originalFormData, setOriginalFormData] = useState<FormData>({ title: '', description: '', contacts: '', salary: '', company: '', location: '', experience: '', skills: '', rcName: '', rcSpecialty: '', rcInterests: '', rcLinkedin: '' });
-  const [correctedFormData, setCorrectedFormData] = useState<FormData>({ title: '', description: '', contacts: '', salary: '', company: '', location: '', experience: '', skills: '', rcName: '', rcSpecialty: '', rcInterests: '', rcLinkedin: '' });
+  const [resumeOriginal, setResumeOriginal] = useState<ResumeForm>({ title: '', salary: '', experience: '', skills: '', description: '', contacts: '' });
+  const [resumeCorrected, setResumeCorrected] = useState<ResumeForm>({ title: '', salary: '', experience: '', skills: '', description: '', contacts: '' });
+  
   const [lastAiInputSnapshot, setLastAiInputSnapshot] = useState<string | null>(null);
   const [aiChanges, setAiChanges] = useState<AIChange[]>([]);
   const [isAiLoading, setIsAiLoading] = useState(false);
 
-  // FIX: Auto-save only for RESUME
+  // Helper to get active data based on tab
+  const getActiveData = (): AnyFormData => {
+      if (activeTab === 'VACANCY') return vacancyForm;
+      if (activeTab === 'RANDOM_COFFEE') return rcForm;
+      return resumeMode === 'CORRECTED' ? resumeCorrected : resumeOriginal;
+  };
+
+  // Исправлено: типизация update функции без any
+  const setActiveData = (updater: AnyFormData | FormUpdater) => {
+      if (activeTab === 'VACANCY') {
+          setVacancyForm(updater as SetStateAction<VacancyForm>);
+      } else if (activeTab === 'RANDOM_COFFEE') {
+          setRcForm(updater as SetStateAction<RCForm>);
+      } else {
+          // RESUME
+          const resumeUpdater = updater as SetStateAction<ResumeForm>;
+          if (resumeMode === 'CORRECTED') setResumeCorrected(resumeUpdater);
+          else setResumeOriginal(resumeUpdater);
+      }
+  };
+
+  // Auto-save (Only Resume Original)
   useEffect(() => {
       if (!tgUser?.id || activeTab !== 'RESUME') return;
       const timeoutId = setTimeout(() => {
@@ -236,45 +312,26 @@ export default function TgAppPage() {
               body: JSON.stringify({
                   action: 'save_resume_draft',
                   userId: tgUser.id,
-                  original: {
-                      title: originalFormData.title, salary: originalFormData.salary, experience: originalFormData.experience,
-                      skills: originalFormData.skills, description: originalFormData.description, contacts: originalFormData.contacts
-                  },
-                  corrected: {
-                      title: correctedFormData.title, salary: correctedFormData.salary, experience: correctedFormData.experience,
-                      skills: correctedFormData.skills, description: correctedFormData.description, contacts: correctedFormData.contacts
-                  }
+                  original: resumeOriginal,
+                  corrected: resumeCorrected
               })
-          }).catch(e => console.error("Auto-save failed", e));
+          }).catch(console.error);
       }, 1000);
       return () => clearTimeout(timeoutId);
-  }, [activeTab, originalFormData, correctedFormData, tgUser]);
-
-  const getCurrentFormData = () => (activeTab === 'RESUME' && resumeMode === 'CORRECTED') ? correctedFormData : originalFormData;
-
-  // FIX: Properly handle functional state updates
-  const setCurrentFormData = (updater: FormData | ((prev: FormData) => FormData)) => {
-      if (activeTab === 'RESUME' && resumeMode === 'CORRECTED') {
-          setCorrectedFormData((prev) => (typeof updater === 'function' ? updater(prev) : updater));
-      } else {
-          setOriginalFormData((prev) => (typeof updater === 'function' ? updater(prev) : updater));
-      }
-  };
+  }, [activeTab, resumeOriginal, resumeCorrected, tgUser]);
 
   const isFormValid = () => {
-      const required = ['title', 'description', 'contacts', 'experience', 'skills'];
-      return required.every(f => !!originalFormData[f as keyof FormData]?.trim());
+      const required: (keyof ResumeForm)[] = ['title', 'description', 'contacts', 'experience', 'skills'];
+      return required.every(f => !!resumeOriginal[f]?.trim());
   };
 
   const hasOriginalChangedSinceGeneration = () => {
       if (!lastAiInputSnapshot) return true;
-      return JSON.stringify(originalFormData) !== lastAiInputSnapshot;
+      return JSON.stringify(resumeOriginal) !== lastAiInputSnapshot;
   };
 
   const aiAvailable = activeTab === 'RESUME' && isFormValid() && (aiChanges.length === 0 || hasOriginalChangedSinceGeneration());
-  
-  // FIX: Determine if we have a corrected version loaded (for showing tabs on reload)
-  const hasCorrectedVersion = !!correctedFormData.title && !!correctedFormData.description;
+  const hasCorrectedVersion = !!resumeCorrected.title && !!resumeCorrected.description;
 
   useEffect(() => {
     const init = async () => {
@@ -286,6 +343,7 @@ export default function TgAppPage() {
           const tg = window.Telegram.WebApp;
           tg.ready(); tg.expand(); setTgUser(tg.initDataUnsafe?.user as TelegramUser);
           document.body.style.backgroundColor = tg.themeParams.secondary_bg_color || '#f3f4f6';
+          document.body.style.color = tg.themeParams.text_color || '#000000';
           const startParam = tg.initDataUnsafe?.start_param;
           if (startParam && Array.isArray(data)) {
              const target = data.find((c: Channel) => c.id === startParam || c.username.replace('@', '') === startParam);
@@ -306,20 +364,18 @@ export default function TgAppPage() {
                 if (data) {
                     if (data.profile) {
                         setIsParticipating(data.isParticipating);
-                        setOriginalFormData(prev => ({ ...prev, rcName: data.profile.name || '', rcSpecialty: data.profile.specialty || '', rcInterests: data.profile.interests || '', rcLinkedin: data.profile.linkedin || '' }));
+                        setRcForm(prev => ({ ...prev, rcName: data.profile.name || '', rcSpecialty: data.profile.specialty || '', rcInterests: data.profile.interests || '', rcLinkedin: data.profile.linkedin || '' }));
                     }
                     if (data.resumeDraft) {
-                        if (data.resumeDraft.original) {
-                            setOriginalFormData(prev => ({ ...prev, ...data.resumeDraft.original }));
-                        }
+                        if (data.resumeDraft.original) setResumeOriginal(prev => ({ ...prev, ...data.resumeDraft.original }));
                         if (data.resumeDraft.corrected) {
-                            setCorrectedFormData(prev => ({ ...prev, ...data.resumeDraft.corrected }));
-                            setResumeMode('CORRECTED'); // Restore state
+                            setResumeCorrected(prev => ({ ...prev, ...data.resumeDraft.corrected }));
+                            setResumeMode('CORRECTED');
                         }
                     }
                 }
             })
-            .catch(e => console.error(e));
+            .catch(console.error);
       }
   }, [tgUser]);
 
@@ -347,7 +403,7 @@ export default function TgAppPage() {
   const handleAiFix = async () => {
       setIsAiLoading(true);
       try {
-          const res = await fetch('/api/tg-jobs', { method: 'POST', body: JSON.stringify({ action: 'create_ai_invoice', userId: tgUser?.id || '12345', username: tgUser?.username, payload: originalFormData }) });
+          const res = await fetch('/api/tg-jobs', { method: 'POST', body: JSON.stringify({ action: 'create_ai_invoice', userId: tgUser?.id || '12345', username: tgUser?.username, payload: resumeOriginal }) });
           const data = await res.json();
           if (data.invoiceLink) {
               window.Telegram.WebApp.openInvoice(data.invoiceLink, async (status: string) => {
@@ -356,15 +412,15 @@ export default function TgAppPage() {
                           window.Telegram?.WebApp?.showAlert('Оплата прошла! Генерируем улучшенную версию...');
                           try {
                               const genData = await pollForGeneration(data.orderId);
-                              setLastAiInputSnapshot(JSON.stringify(originalFormData));
+                              setLastAiInputSnapshot(JSON.stringify(resumeOriginal));
                               const aiRes = genData.aiResult.resume;
-                              setCorrectedFormData(prev => ({ ...prev, ...aiRes }));
+                              setResumeCorrected(prev => ({ ...prev, ...aiRes }));
                               setAiChanges(genData.aiResult.changes);
                               setResumeMode('CORRECTED');
                               window.Telegram?.WebApp?.showAlert('Резюме улучшено!');
                           } catch (e) {
                               console.error(e);
-                              window.Telegram?.WebApp?.showAlert('Ошибка генерации (тайм-аут). Средства будут возвращены.');
+                              window.Telegram?.WebApp?.showAlert('Ошибка генерации. Средства возвращены.');
                           }
                       }
                   } finally { setIsAiLoading(false); }
@@ -374,7 +430,10 @@ export default function TgAppPage() {
   };
 
   const validateForm = () => {
-      const fd = getCurrentFormData();
+      const fd = getActiveData();
+      // Безопасное приведение к Record для проверки полей
+      const fdRecord = fd as unknown as Record<string, string>;
+      
       let required: string[] = [];
       let currentTabFields: string[] = [];
 
@@ -390,17 +449,22 @@ export default function TgAppPage() {
       }
 
       for (const field of required) {
-          if (!fd[field as keyof FormData]?.trim()) { window.Telegram?.WebApp?.showAlert(`Поле "${getLabel(field, activeTab)}" обязательно для заполнения`); return false; }
+          if (!fdRecord[field]?.trim()) { window.Telegram?.WebApp?.showAlert(`Поле "${getLabel(field)}" обязательно`); return false; }
       }
       for (const field of currentTabFields) {
           const limit = CHAR_LIMITS[field];
-          const val = fd[field as keyof FormData];
-          if (limit && (val?.length || 0) > limit) { window.Telegram?.WebApp?.showAlert(`Поле "${getLabel(field, activeTab)}" превышает лимит.`); return false; }
+          const val = fdRecord[field];
+          if (limit && (val?.length || 0) > limit) { window.Telegram?.WebApp?.showAlert(`Поле "${getLabel(field)}" превышает лимит.`); return false; }
       }
       if (activeTab !== 'RANDOM_COFFEE') {
+          // Безопасно проверяем контакты только если это не RC форма
+          const contact = (fd as (VacancyForm | ResumeForm)).contacts;
           const contactRegex = /(@[\w\d_]+|https?:\/\/[^\s]+|[\w\d._%+-]+@[\w\d.-]+\.[\w]{2,4})/i;
-          if (!contactRegex.test(fd.contacts)) { window.Telegram?.WebApp?.showAlert('В контактах укажите @username, ссылку на сайт или email'); return false; }
+          if (!contactRegex.test(contact)) { window.Telegram?.WebApp?.showAlert('В контактах укажите @username, ссылку или email'); return false; }
       }
+      
+      const currentTabTotalLen = currentTabFields.reduce((acc, field) => acc + (fdRecord[field]?.length || 0), 0);
+      if (currentTabTotalLen > MAX_TOTAL_CHARS) { window.Telegram?.WebApp?.showAlert(`Общий размер текста слишком большой.`); return false; }
       return true;
   };
 
@@ -423,26 +487,36 @@ export default function TgAppPage() {
       try {
           const res = await fetch('/api/tg-jobs', {
               method: 'POST',
-              body: JSON.stringify({ action: 'create_invoice', channelIds: activeTab === 'RANDOM_COFFEE' ? [] : selectedIds, type: activeTab, payload: getCurrentFormData(), userId: tgUser?.id || '12345', username: tgUser?.username }),
+              body: JSON.stringify({ action: 'create_invoice', channelIds: activeTab === 'RANDOM_COFFEE' ? [] : selectedIds, type: activeTab, payload: getActiveData(), userId: tgUser?.id || '12345', username: tgUser?.username }),
           });
           const data = await res.json();
           if (data.invoiceLink) window.Telegram.WebApp.openInvoice(data.invoiceLink, (s:string) => { if(s==='paid') window.Telegram.WebApp.close(); });
       } catch { alert('Error'); }
   };
 
-  const handleCancel = async () => { /* ... existing cancel logic ... */ };
+  const handleCancel = async () => {
+      window.Telegram?.WebApp?.showConfirm('Вы уверены? Мы вернем 100 звезд.', async (confirmed: boolean) => {
+          if (confirmed) {
+              try {
+                  const res = await fetch('/api/tg-jobs', { method: 'POST', body: JSON.stringify({ action: 'cancel_random_coffee', userId: tgUser?.id || '12345' }) });
+                  const data = await res.json();
+                  if (data.ok) { setIsParticipating(false); window.Telegram?.WebApp?.showAlert('Отменено.'); }
+                  else window.Telegram?.WebApp?.showAlert('Ошибка: ' + (data.error || 'Unknown'));
+              } catch { window.Telegram?.WebApp?.showAlert('Ошибка соединения'); }
+          }
+      });
+  };
 
   if (loading) return <div>Loading...</div>;
 
   return (
     <div className="min-h-screen font-sans bg-[#f3f4f6] text-gray-900 pb-24">
-        {/* ... Header and Progress Bar ... */}
         <div className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b px-4 py-3 flex items-center justify-between">
             {step > 1 ? (<button onClick={goBack} className="p-1 -ml-2 rounded-full hover:bg-gray-100"><ChevronLeft /></button>) : <div className="w-8" />}
             <div className="font-semibold text-sm">Шаг {step===4 && activeTab==='RANDOM_COFFEE'?'3':step}</div><div className="w-8" /> 
         </div>
         <div className="h-1 bg-gray-200 w-full"><div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${(step/4)*100}%` }} /></div>
-
+        
         <div className="p-4 max-w-lg mx-auto">
             {step === 1 && (<div className="text-center mt-4"><h1 className="text-2xl font-bold mb-2">Сервисы</h1><Step1TypeSelection setActiveTab={setActiveTab} goNext={goNext} /></div>)}
             
@@ -450,32 +524,30 @@ export default function TgAppPage() {
                 <>
                     <h2 className="text-xl font-bold mb-4 px-1">{activeTab === 'RANDOM_COFFEE' ? 'Профиль' : 'Данные'}</h2>
                     <Step2Form 
-                        formData={getCurrentFormData()} setFormData={setCurrentFormData} activeTab={activeTab}
+                        data={getActiveData()} setData={setActiveData} activeTab={activeTab}
                         resumeMode={resumeMode} setResumeMode={setResumeMode}
                         aiChanges={aiChanges} handleAiFix={handleAiFix} 
                         isAiLoading={isAiLoading} aiAvailable={aiAvailable}
-                        hasCorrectedVersion={hasCorrectedVersion} // Pass new prop
+                        hasCorrectedVersion={hasCorrectedVersion}
                     />
                 </>
             )}
 
             {step === 3 && activeTab !== 'RANDOM_COFFEE' && (<><h2 className="text-xl font-bold mb-4 px-1">Каналы</h2><Step3Channels channels={channels} selectedIds={selectedIds} setSelectedIds={setSelectedIds} /></>)}
             
-            {step === 4 && (<><h2 className="text-xl font-bold mb-4 px-1">Итог</h2><Step4Preview activeTab={activeTab} formData={getCurrentFormData()} isParticipating={isParticipating} /></>)}
+            {step === 4 && (<><h2 className="text-xl font-bold mb-4 px-1">Итог</h2><Step4Preview activeTab={activeTab} data={getActiveData()} isParticipating={isParticipating} /></>)}
         </div>
 
-        {/* ... Footer ... */}
         {step > 1 && (
             <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 safe-area-bottom z-30 shadow-lg">
                 <div className="max-w-lg mx-auto flex items-center gap-4">
                     {(step === 3 || step === 4) && activeTab !== 'RANDOM_COFFEE' && (<div className="flex-1"><div className="text-xs text-gray-400">Итого:</div><div className="text-lg font-bold">⭐️ {totalPrice}</div></div>)}
                     {activeTab === 'RANDOM_COFFEE' && step === 4 && (<div className="flex-1"><div className="text-xs text-gray-400">Взнос:</div><div className="text-lg font-bold">⭐️ 100</div></div>)}
-
                     {step === 4 && activeTab === 'RANDOM_COFFEE' && isParticipating ? (
                         <button onClick={handleCancel} className="w-full bg-red-50 text-red-600 border border-red-200 font-bold py-3 px-6 rounded-xl">Отменить</button>
                     ) : (
                         <button onClick={step === 4 ? handlePay : goNext} disabled={step===3 && !selectedIds.length && activeTab!=='RANDOM_COFFEE'} className="bg-blue-600 text-white font-bold py-3 px-6 rounded-xl w-full disabled:opacity-50">
-                            {step === 2 && activeTab === 'RESUME' && aiChanges.length > 0 ? `Далее (${resumeMode === 'ORIGINAL' ? 'Ориг.' : 'Испр.'})` : (step === 4 ? 'Оплатить' : 'Далее')}
+                            {step === 2 && activeTab === 'RESUME' && aiChanges && aiChanges.length > 0 ? `Далее (${resumeMode === 'ORIGINAL' ? 'Ориг.' : 'Испр.'})` : (step === 4 ? 'Оплатить' : 'Далее')}
                         </button>
                     )}
                 </div>
