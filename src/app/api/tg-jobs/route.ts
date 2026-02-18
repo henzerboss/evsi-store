@@ -45,6 +45,15 @@ const safeJson = (s?: string | null) => {
   try { return JSON.parse(s); } catch { return null; }
 };
 
+// HTML Sanitizer for Telegram messages
+function sanitizeForHtml(str: string | undefined | null): string {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function getNextFriday() {
     const d = new Date();
     const day = d.getDay();
@@ -59,12 +68,31 @@ async function generateImprovedResume(resumeData: ResumeData): Promise<AIResult>
     const apiKey = process.env.GEMINI_API_KEY_RESUME;
     if (!apiKey) throw new Error("API Key not configured");
 
+    // Усиленный промпт для предотвращения [object Object]
     const prompt = `
-Ты — опытный HR. Проверь и улучши резюме.
-Сохраняй смысл, улучшай стиль (деловой, без воды).
-JSON формат: { "resume": { ...fields... }, "changes": [ { "field", "what_fixed", "why" } ] }
+Ты — опытный HR. Твоя задача — улучшить резюме.
 
-Данные:
+ВАЖНО:
+1. "contacts" должно быть ОБЫЧНОЙ СТРОКОЙ (например: "@user, +7999..."), а не объектом или массивом.
+2. Не выдумывай факты, сохраняй смысл.
+3. Стиль деловой, без воды.
+
+ФОРМАТ JSON (СТРОГО):
+{
+  "resume": {
+    "title": "Исправленная должность (строка, макс 150)",
+    "salary": "Исправленная зп (строка, макс 100)",
+    "experience": "Исправленный опыт (строка, макс 500)",
+    "skills": "Исправленные навыки (строка, макс 500)",
+    "description": "Исправленное описание (строка, макс 3000)",
+    "contacts": "Контакты одной строкой (макс 200)"
+  },
+  "changes": [
+    { "field": "Название поля", "what_fixed": "Что исправлено", "why": "Почему это лучше" }
+  ]
+}
+
+Данные кандидата:
 Должность: ${resumeData.title}
 ЗП: ${resumeData.salary}
 Опыт: ${resumeData.experience}
@@ -85,8 +113,14 @@ JSON формат: { "resume": { ...fields... }, "changes": [ { "field", "what_f
     if (!response.ok) throw new Error(`Gemini API Error`);
     const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error("No content");
-    return JSON.parse(text) as AIResult;
+    if (!text) throw new Error("No content generated");
+    
+    try {
+        return JSON.parse(text) as AIResult;
+    } catch (e) {
+        console.error("JSON Parse Error:", text);
+        throw new Error("Invalid JSON from AI");
+    }
 }
 
 // --- Handlers ---
@@ -157,7 +191,7 @@ export async function POST(req: Request) {
           await prisma.tgUserProfile.upsert({
               where: { telegramUserId: String(userId) },
               update: {
-                  resumeOriginal: original ? JSON.stringify(original) : null, // Используем null для очистки
+                  resumeOriginal: original ? JSON.stringify(original) : null,
                   resumeCorrected: corrected ? JSON.stringify(corrected) : null
               },
               create: {
@@ -225,13 +259,62 @@ export async function POST(req: Request) {
               create: { telegramUserId: order.telegramUserId, resumeCorrected: JSON.stringify(aiResult.resume) }
           });
 
-          // Notifications...
+          // --- Notifications (With Sanitization!) ---
           const userId = order.telegramUserId;
-          await telegramRequest('sendMessage', {
-              chat_id: userId,
-              text: `✨ <b>Резюме улучшено!</b>\nМы обновили данные в Mini App.\n\nПроверьте вкладку "Исправленная".`,
-              parse_mode: 'HTML'
-          });
+
+          try {
+            // 1. Оригинал
+            await telegramRequest('sendMessage', {
+                chat_id: userId,
+                text: `📄 <b>Ваше оригинальное резюме:</b>\n\n` + 
+                      `<b>Должность:</b> ${sanitizeForHtml(originalData.title)}\n` +
+                      `<b>Опыт:</b> ${sanitizeForHtml(originalData.experience)}\n` +
+                      `<b>Навыки:</b> ${sanitizeForHtml(originalData.skills)}\n\n` +
+                      `<i>Обработано AI</i>`,
+                parse_mode: 'HTML'
+            });
+
+            // 2. Исправленное
+            const fixed = aiResult.resume;
+            await telegramRequest('sendMessage', {
+                chat_id: userId,
+                text: `✨ <b>Исправленная версия:</b>\n\n` + 
+                      `<b>Должность:</b> ${sanitizeForHtml(fixed.title)}\n` +
+                      `<b>ЗП:</b> ${sanitizeForHtml(fixed.salary)}\n` +
+                      `<b>Опыт:</b> ${sanitizeForHtml(fixed.experience)}\n` +
+                      `<b>Навыки:</b> ${sanitizeForHtml(fixed.skills)}\n` +
+                      `<b>Описание:</b> ${sanitizeForHtml(fixed.description)}\n` +
+                      `<b>Контакты:</b> ${sanitizeForHtml(fixed.contacts)}`,
+                parse_mode: 'HTML'
+            });
+
+            // 3. Изменения
+            let changesText = "📝 <b>Что улучшили:</b>\n\n";
+            aiResult.changes.forEach((c: AIChange) => {
+                changesText += `• <b>${sanitizeForHtml(c.field)}:</b> ${sanitizeForHtml(c.what_fixed)}\n  <i>${sanitizeForHtml(c.why)}</i>\n\n`;
+            });
+            
+            await telegramRequest('sendMessage', {
+                chat_id: userId,
+                text: changesText,
+                parse_mode: 'HTML'
+            });
+          } catch (notifyError) {
+              console.error("Failed to send telegram notifications:", notifyError);
+              // Не фейлим весь процесс, если сообщение не ушло, данные уже сохранены
+          }
+
+          // Админу
+          const adminChatId = process.env.TELEGRAM_ADMIN_ID;
+          if (adminChatId) {
+              try {
+                await telegramRequest('sendMessage', {
+                    chat_id: adminChatId,
+                    text: `🤖 <b>AI Resume Fix Used!</b>\nUser: @${order.telegramUsername}\nIncome: 100 ⭐️`,
+                    parse_mode: 'HTML'
+                });
+              } catch {}
+          }
 
           return NextResponse.json({ success: true, aiResult });
 
@@ -243,10 +326,18 @@ export async function POST(req: Request) {
                   telegram_payment_charge_id: order.telegramPaymentChargeId
               });
               await prisma.tgOrder.update({ where: { id: orderId }, data: { status: 'REFUNDED' } });
+              await telegramRequest('sendMessage', {
+                  chat_id: order.telegramUserId,
+                  text: `⚠️ Произошла ошибка при генерации AI-резюме. Мы вернули вам 100 звезд.`,
+              });
           }
           return NextResponse.json({ error: 'AI Generation Failed, refunded' }, { status: 500 });
       }
   }
+
+  // ... (Остальной код CANCEL, CREATE INVOICE, PAYMENT SUCCESS без изменений) ...
+  // Чтобы не дублировать код, я оставляю нижнюю часть файла такой же, как в предыдущем ответе.
+  // Главное - исправления выше в generate_ai_resume и generateImprovedResume.
 
   // --- CANCEL RANDOM COFFEE ---
   if (body.action === 'cancel_random_coffee') {
@@ -298,7 +389,7 @@ export async function POST(req: Request) {
 
     const tgResponse = await telegramRequest('createInvoiceLink', invoiceData);
     if (!tgResponse.ok) return NextResponse.json({ error: 'Failed' }, { status: 500 });
-    return NextResponse.json({ invoiceLink: tgResponse.result });
+    return NextResponse.json({ invoiceLink: tgResponse.result, orderId: order.id });
   }
 
   if (body.pre_checkout_query) {
@@ -334,7 +425,6 @@ export async function POST(req: Request) {
         await telegramRequest('sendMessage', { chat_id: body.message.chat.id, text: `✅ <b>Оплата прошла успешно!</b> Заявка на модерации.`, parse_mode: 'HTML' });
     }
     
-    // Admin notify
     const adminChatId = process.env.TELEGRAM_ADMIN_ID;
     if (adminChatId) {
         telegramRequest('sendMessage', { chat_id: adminChatId, text: `🔥 <b>Paid: ${updatedOrder.type}</b> @${updatedOrder.telegramUsername}`, parse_mode: 'HTML' }).catch(() => {});
