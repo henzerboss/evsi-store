@@ -459,10 +459,11 @@ export async function POST(req: Request) {
             create: { telegramUserId: userId, name: data.rcName, specialty: data.rcSpecialty, interests: data.rcInterests, linkedin: data.rcLinkedin }
         });
         const nextFriday = getNextFriday();
+        const dateStr = nextFriday.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
         await prisma.randomCoffeeParticipation.create({
             data: { profileId: profile.id, matchDate: nextFriday, status: 'PAID', telegramPaymentChargeId: payment.telegram_payment_charge_id }
         });
-        await telegramRequest('sendMessage', { chat_id: body.message.chat.id, text: `☕️ <b>Оплата принята!</b> Вы в игре.`, parse_mode: 'HTML' });
+        await telegramRequest('sendMessage', { chat_id: body.message.chat.id, text: `☕️ <b>Оплата принята! Вы в игре.</b>\n\nРаспределение пар произойдет в пятницу <b>${dateStr} в 10:00 МСК</b>.\nБот пришлет вам контакт собеседника.\n\nУдачи!`, parse_mode: 'HTML' });
 
         if (adminChatId) {
             try {

@@ -145,9 +145,9 @@ const Step2Form = ({
             )}
 
             <div className="bg-white p-5 rounded-2xl shadow-sm space-y-2 pb-8">
-                {activeTab === 'VACANCY' && (<>{renderInput('title', 'Например: Senior React Developer')}<div className="grid grid-cols-2 gap-3">{renderInput('company', 'Google')}{renderInput('location', 'Москва, Офис')}</div>{renderInput('salary', 'от 200 000 руб')}{renderInput('description', 'Подробное описание...', true)}{renderInput('contacts', '@username')}</>)}
+                {activeTab === 'VACANCY' && (<>{renderInput('title', 'Например: Senior React Developer')}<div className="grid grid-cols-2 gap-3">{renderInput('company', 'Google')}{renderInput('location', 'Москва, Офис')}</div>{renderInput('salary', 'от 200 000 руб')}{renderInput('description', 'Подробное описание...', true)}{renderInput('contacts', '@username, ссылка или email')}</>)}
                 
-                {activeTab === 'RESUME' && (<>{renderInput('title', 'Например: Senior React Developer')}{renderInput('salary', 'от 200 000 руб')}{renderInput('experience', '5 лет...')}{renderInput('skills', 'JS, TS...')}{renderInput('description', 'О себе...', true)}{renderInput('contacts', '@username')}</>)}
+                {activeTab === 'RESUME' && (<>{renderInput('title', 'Например: Senior React Developer')}{renderInput('salary', 'от 200 000 руб')}{renderInput('experience', '5 лет...')}{renderInput('skills', 'JS, TS...')}{renderInput('description', 'О себе...', true)}{renderInput('contacts', '@username, ссылка или email')}</>)}
                 
                 {activeTab === 'RANDOM_COFFEE' && (<><p className="text-xs text-gray-500 mb-4 bg-orange-50 p-3 rounded-lg border border-orange-100">Данные для нетворкинга.</p>{renderInput('rcName', 'Иван')}{renderInput('rcSpecialty', 'Product Manager')}{renderInput('rcInterests', 'AI, стартапы...', true)}{renderInput('rcLinkedin', 'https://linkedin.com/...')}</>)}
             </div>
