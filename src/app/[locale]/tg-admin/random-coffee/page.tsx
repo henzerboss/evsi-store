@@ -12,6 +12,10 @@ const prisma = new PrismaClient();
 
 const RC_PRICE_STARS = Number(process.env.RANDOM_COFFEE_PRICE_STARS || 100);
 
+// Для server action "дослать ссылки"
+const SITE_URL = (process.env.SITE_URL || "https://evsi.store").replace(/\/$/, "");
+const CRON_SECRET = process.env.CRON_SECRET || "";
+
 // Локальные интерфейсы для безопасности
 interface RCProfile {
   id: string;
@@ -123,16 +127,77 @@ async function deleteProfileAction(formData: FormData) {
   revalidatePath(`/${locale}/tg-admin/random-coffee`);
 }
 
+/**
+ * Server Action: дослать ссылки на пары за дату (YYYY-MM-DD)
+ * Дергает /api/cron/random-coffee?action=resend_links&date=...
+ */
+async function resendLinksAction(formData: FormData) {
+  "use server";
+
+  const session = await auth();
+  if (!session) redirect("/login");
+
+  const locale = String(formData.get("locale") || "ru");
+  const date = String(formData.get("date") || "").trim(); // YYYY-MM-DD
+  const safeDate = date || new Date().toISOString().slice(0, 10);
+
+  if (!CRON_SECRET) {
+    redirect(`/${locale}/tg-admin/random-coffee?resend=error&msg=${encodeURIComponent("CRON_SECRET is not set")}`);
+  }
+
+  const url =
+    `${SITE_URL}/api/cron/random-coffee` +
+    `?secret=${encodeURIComponent(CRON_SECRET)}` +
+    `&action=resend_links` +
+    `&date=${encodeURIComponent(safeDate)}`;
+
+  try {
+    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      const msg = json?.error || json?.message || `HTTP ${res.status}`;
+      redirect(`/${locale}/tg-admin/random-coffee?resend=error&msg=${encodeURIComponent(msg)}`);
+    }
+
+    const sent = json?.sent ?? 0;
+    const matched = json?.matched ?? json?.count ?? 0;
+    const skipped = json?.skipped ?? 0;
+
+    redirect(
+      `/${locale}/tg-admin/random-coffee?resend=ok` +
+        `&date=${encodeURIComponent(safeDate)}` +
+        `&sent=${encodeURIComponent(String(sent))}` +
+        `&matched=${encodeURIComponent(String(matched))}` +
+        `&skipped=${encodeURIComponent(String(skipped))}`
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    redirect(`/${locale}/tg-admin/random-coffee?resend=error&msg=${encodeURIComponent(msg)}`);
+  }
+}
+
 export default async function RandomCoffeeAdminPage({
   params,
+  searchParams,
 }: {
   // ✅ Next 15: params может быть Promise
   params: Promise<{ locale: string }>;
+  // ✅ searchParams тоже может быть Promise
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await auth();
   if (!session) redirect("/login");
 
   const { locale = "ru" } = await params;
+  const sp = (await searchParams) || {};
+
+  const resendStatus = typeof sp.resend === "string" ? sp.resend : "";
+  const resendMsg = typeof sp.msg === "string" ? sp.msg : "";
+  const resendDate = typeof sp.date === "string" ? sp.date : "";
+  const resendSent = typeof sp.sent === "string" ? sp.sent : "";
+  const resendMatched = typeof sp.matched === "string" ? sp.matched : "";
+  const resendSkipped = typeof sp.skipped === "string" ? sp.skipped : "";
 
   const profiles = (await prisma.randomCoffeeProfile.findMany({
     orderBy: { createdAt: "desc" },
@@ -158,6 +223,9 @@ export default async function RandomCoffeeAdminPage({
     orderBy: { date: "desc" },
   })) as RCHistory[];
 
+  // дефолт для инпута даты: сегодня
+  const today = new Date().toISOString().slice(0, 10);
+
   return (
     <div className="container max-w-6xl mx-auto py-10 px-4">
       <div className="flex justify-between items-center mb-8 border-b pb-4">
@@ -174,6 +242,50 @@ export default async function RandomCoffeeAdminPage({
           </Link>
           <SignOutButton />
         </div>
+      </div>
+
+      {/* Панель действий */}
+      <div className="mb-8 bg-white rounded-xl border shadow-sm p-4">
+        <div className="flex flex-col md:flex-row md:items-end gap-4 justify-between">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">⚡️ Быстрые действия</div>
+            <div className="text-xs text-gray-500 mt-1">
+              Можно дослать кнопки «Написать» по уже смэтченным парам за выбранную дату.
+            </div>
+          </div>
+
+          <form action={resendLinksAction} className="flex flex-col sm:flex-row gap-3 sm:items-end">
+            <input type="hidden" name="locale" value={locale} />
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Дата мэтча</label>
+              <input
+                type="date"
+                name="date"
+                defaultValue={today}
+                className="h-10 rounded-lg border border-gray-200 px-3 text-sm"
+              />
+            </div>
+            <button
+              type="submit"
+              className="h-10 inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700"
+              title="Разошлет сообщение с кнопкой «Написать» по всем MATCHED за дату"
+            >
+              Дослать ссылки
+            </button>
+          </form>
+        </div>
+
+        {/* Статус результата */}
+        {resendStatus === "ok" && (
+          <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+            ✅ Ссылки досланы за дату <b>{resendDate || "—"}</b>. Отправлено: <b>{resendSent}</b>, matched: <b>{resendMatched}</b>, пропущено: <b>{resendSkipped}</b>.
+          </div>
+        )}
+        {resendStatus === "error" && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            ❌ Ошибка при рассылке: <b>{resendMsg || "Unknown error"}</b>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
