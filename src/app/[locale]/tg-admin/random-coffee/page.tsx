@@ -51,9 +51,7 @@ async function cancelParticipationAction(formData: FormData) {
   const participationId = String(formData.get("participationId") || "");
   const locale = String(formData.get("locale") || "ru");
 
-  if (!participationId) {
-    throw new Error("No participationId provided");
-  }
+  if (!participationId) throw new Error("No participationId provided");
 
   const p = await prisma.randomCoffeeParticipation.findUnique({
     where: { id: participationId },
@@ -63,7 +61,6 @@ async function cancelParticipationAction(formData: FormData) {
   if (!p) throw new Error("Participation not found");
 
   if (!p.telegramPaymentChargeId) {
-    // нечего возвращать
     await prisma.randomCoffeeParticipation.update({
       where: { id: participationId },
       data: { status: "CANCELLED_NO_CHARGE" },
@@ -72,25 +69,21 @@ async function cancelParticipationAction(formData: FormData) {
     return;
   }
 
-  // 1) refund stars
   const refundRes = await telegramRequest("refundStarPayment", {
     user_id: parseInt(p.profile.telegramUserId, 10),
     telegram_payment_charge_id: p.telegramPaymentChargeId,
   });
 
   if (!refundRes?.ok) {
-    // не роняем всё, но покажем ошибку в логах
     console.error("Refund failed:", refundRes);
     throw new Error(refundRes?.description || "Refund failed");
   }
 
-  // 2) update status
   await prisma.randomCoffeeParticipation.update({
     where: { id: participationId },
     data: { status: "REFUNDED_BY_ADMIN" },
   });
 
-  // 3) notify user
   try {
     await telegramRequest("sendMessage", {
       chat_id: p.profile.telegramUserId,
@@ -98,8 +91,8 @@ async function cancelParticipationAction(formData: FormData) {
         `☕️ Ваше участие в Random Coffee отменено администратором.\n\n` +
         `Мы вернули вам ${RC_PRICE_STARS} ⭐️.`,
     });
-  } catch (e) {
-    console.error("Failed to notify user about refund:", e);
+  } catch (err) {
+    console.error("Failed to notify user about refund:", err);
   }
 
   revalidatePath(`/${locale}/tg-admin/random-coffee`);
@@ -119,12 +112,10 @@ async function deleteProfileAction(formData: FormData) {
 
   if (!profileId) throw new Error("No profileId provided");
 
-  // удаляем participations профиля (чтобы не словить FK)
   await prisma.randomCoffeeParticipation.deleteMany({
     where: { profileId },
   });
 
-  // сам профиль
   await prisma.randomCoffeeProfile.delete({
     where: { id: profileId },
   });
@@ -135,23 +126,21 @@ async function deleteProfileAction(formData: FormData) {
 export default async function RandomCoffeeAdminPage({
   params,
 }: {
-  params: { locale: string };
+  // ✅ Next 15: params может быть Promise
+  params: Promise<{ locale: string }>;
 }) {
   const session = await auth();
   if (!session) redirect("/login");
 
-  const locale = params?.locale || "ru";
+  const { locale = "ru" } = await params;
 
-  // 1. Все профили
   const profiles = (await prisma.randomCoffeeProfile.findMany({
     orderBy: { createdAt: "desc" },
   })) as RCProfile[];
 
-  // Для отображения истории по id -> профиль
   const profileById = new Map<string, RCProfile>();
   for (const p of profiles) profileById.set(p.id, p);
 
-  // 2. Участники на ближайшую пятницу (или сегодня, если пятница)
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
 
@@ -164,7 +153,6 @@ export default async function RandomCoffeeAdminPage({
     orderBy: { matchDate: "asc" },
   })) as RCParticipation[];
 
-  // 3. История совпадений (последние 50)
   const history = (await prisma.randomCoffeeHistory.findMany({
     take: 50,
     orderBy: { date: "desc" },
@@ -246,10 +234,7 @@ export default async function RandomCoffeeAdminPage({
                           </span>
                         </td>
                         <td className="px-6 py-4">{p.profile.specialty}</td>
-                        <td
-                          className="px-6 py-4 max-w-xs truncate"
-                          title={p.profile.interests}
-                        >
+                        <td className="px-6 py-4 max-w-xs truncate" title={p.profile.interests}>
                           {p.profile.interests}
                         </td>
                         <td className="px-6 py-4 text-right">
