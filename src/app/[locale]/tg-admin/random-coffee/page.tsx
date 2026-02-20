@@ -12,10 +12,6 @@ const prisma = new PrismaClient();
 
 const RC_PRICE_STARS = Number(process.env.RANDOM_COFFEE_PRICE_STARS || 100);
 
-// Для server action "дослать ссылки"
-const SITE_URL = (process.env.SITE_URL || "https://evsi.store").replace(/\/$/, "");
-const CRON_SECRET = process.env.CRON_SECRET || "";
-
 // Локальные интерфейсы для безопасности
 interface RCProfile {
   id: string;
@@ -41,6 +37,20 @@ interface RCHistory {
   date: Date;
   userAId: string;
   userBId: string;
+}
+
+function escapeHtml(s: string) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function normalizeUsername(u?: string | null) {
+  if (!u) return null;
+  const trimmed = u.trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
 }
 
 /**
@@ -129,7 +139,10 @@ async function deleteProfileAction(formData: FormData) {
 
 /**
  * Server Action: дослать ссылки на пары за дату (YYYY-MM-DD)
- * Дергает /api/cron/random-coffee?action=resend_links&date=...
+ *
+ * Надёжность:
+ * 1) Если у партнёра есть username (берём из TgOrder.telegramUsername по telegramUserId) — используем кнопку с https://t.me/<username>
+ * 2) Если username нет — кладём HTML-ссылку tg://user?id=<id> (fallback)
  */
 async function resendLinksAction(formData: FormData) {
   "use server";
@@ -141,40 +154,165 @@ async function resendLinksAction(formData: FormData) {
   const date = String(formData.get("date") || "").trim(); // YYYY-MM-DD
   const safeDate = date || new Date().toISOString().slice(0, 10);
 
-  if (!CRON_SECRET) {
-    redirect(`/${locale}/tg-admin/random-coffee?resend=error&msg=${encodeURIComponent("CRON_SECRET is not set")}`);
+  // Парсим дату как "день"
+  // new Date('YYYY-MM-DD') -> UTC midnight; для диапазона нам важна согласованность внутри одной операции
+  const dayStart = new Date(safeDate);
+  if (Number.isNaN(dayStart.getTime())) {
+    redirect(
+      `/${locale}/tg-admin/random-coffee?resend=error&msg=${encodeURIComponent(
+        "Invalid date"
+      )}`
+    );
+  }
+  const dayEnd = new Date(dayStart);
+  dayEnd.setUTCDate(dayEnd.getUTCDate() + 1); // exclusive end
+
+  // Берём всех MATCHED за выбранную дату (именно тех, у кого уже есть matchWithId)
+  const matchedParticipations = (await prisma.randomCoffeeParticipation.findMany({
+    where: {
+      status: "MATCHED",
+      matchWithId: { not: null },
+      matchDate: { gte: dayStart, lt: dayEnd },
+    },
+    include: { profile: true },
+    orderBy: { matchDate: "asc" },
+  })) as RCParticipation[];
+
+  if (!matchedParticipations.length) {
+    redirect(
+      `/${locale}/tg-admin/random-coffee?resend=ok&date=${encodeURIComponent(
+        safeDate
+      )}&sent=0&matched=0&skipped=0`
+    );
   }
 
-  const url =
-    `${SITE_URL}/api/cron/random-coffee` +
-    `?secret=${encodeURIComponent(CRON_SECRET)}` +
-    `&action=resend_links` +
-    `&date=${encodeURIComponent(safeDate)}`;
+  // Собираем профили партнёров одним запросом
+  const partnerProfileIds = Array.from(
+    new Set(matchedParticipations.map((p) => String(p.matchWithId)).filter(Boolean))
+  ) as string[];
 
-  try {
-    const res = await fetch(url, { method: "GET", cache: "no-store" });
-    const json = await res.json().catch(() => null);
+  const partnerProfiles = (await prisma.randomCoffeeProfile.findMany({
+    where: { id: { in: partnerProfileIds } },
+  })) as RCProfile[];
 
-    if (!res.ok) {
-      const msg = json?.error || json?.message || `HTTP ${res.status}`;
-      redirect(`/${locale}/tg-admin/random-coffee?resend=error&msg=${encodeURIComponent(msg)}`);
+  const partnerById = new Map<string, RCProfile>();
+  for (const pp of partnerProfiles) partnerById.set(pp.id, pp);
+
+  // Собираем TG userIds партнёров, чтобы получить username из TgOrder
+  const partnerTgIds = Array.from(
+    new Set(partnerProfiles.map((pp) => String(pp.telegramUserId)))
+  );
+
+  // Берём usernames из TgOrder без привязки к type (чтобы не упереться в enum/строку)
+  // Самый свежий username для каждого telegramUserId.
+  const orders = await prisma.tgOrder.findMany({
+    where: {
+      telegramUserId: { in: partnerTgIds },
+      telegramUsername: { not: null },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { telegramUserId: true, telegramUsername: true, createdAt: true },
+  });
+
+  const usernameByTgId = new Map<string, string>();
+  for (const o of orders) {
+    const uname = normalizeUsername(o.telegramUsername);
+    if (!uname) continue;
+    if (!usernameByTgId.has(String(o.telegramUserId))) {
+      usernameByTgId.set(String(o.telegramUserId), uname);
+    }
+  }
+
+  const buildPartnerLinks = (partnerTelegramUserId: string) => {
+    const tgId = String(partnerTelegramUserId);
+    const uname = usernameByTgId.get(tgId);
+
+    // Самое надёжное: https://t.me/<username> (работает везде)
+    const url = uname ? `https://t.me/${uname}` : null;
+
+    // Fallback: tg://user?id= (для HTML-ссылки)
+    const idNum = parseInt(tgId, 10);
+    const tgDeepLink = Number.isFinite(idNum) ? `tg://user?id=${idNum}` : null;
+
+    return { url, tgDeepLink, uname };
+  };
+
+  let sent = 0;
+  let skipped = 0;
+
+  for (const p of matchedParticipations) {
+    const partnerId = String(p.matchWithId || "");
+    const partner = partnerById.get(partnerId);
+
+    if (!partner) {
+      skipped++;
+      continue;
     }
 
-    const sent = json?.sent ?? 0;
-    const matched = json?.matched ?? json?.count ?? 0;
-    const skipped = json?.skipped ?? 0;
+    const { url, tgDeepLink, uname } = buildPartnerLinks(partner.telegramUserId);
 
-    redirect(
-      `/${locale}/tg-admin/random-coffee?resend=ok` +
-        `&date=${encodeURIComponent(safeDate)}` +
-        `&sent=${encodeURIComponent(String(sent))}` +
-        `&matched=${encodeURIComponent(String(matched))}` +
-        `&skipped=${encodeURIComponent(String(skipped))}`
-    );
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    redirect(`/${locale}/tg-admin/random-coffee?resend=error&msg=${encodeURIComponent(msg)}`);
+    // Текст (HTML)
+    const name = escapeHtml(partner.name);
+    const spec = escapeHtml(partner.specialty);
+    const interests = escapeHtml(partner.interests);
+    const linkedin = partner.linkedin ? escapeHtml(partner.linkedin) : "Нет LinkedIn";
+
+    const contactLine =
+      url
+        ? `Напишите собеседнику: <a href="${url}">@${escapeHtml(uname || "")}</a>`
+        : tgDeepLink
+        ? `Напишите собеседнику: <a href="${tgDeepLink}">Написать</a>`
+        : `Напишите собеседнику: (контакт недоступен)`;
+
+    const text =
+      `☕️ <b>Ваша пара на эту неделю!</b>\n\n` +
+      `👤 <b>${name}</b>\n` +
+      `💼 ${spec}\n` +
+      `🎯 ${interests}\n` +
+      `🔗 ${linkedin}\n\n` +
+      `${contactLine}`;
+
+    // Кнопка — только если есть HTTPS url (самое надёжное)
+    const reply_markup =
+      url
+        ? {
+            inline_keyboard: [[{ text: "✉️ Написать", url }]],
+          }
+        : undefined;
+
+    try {
+      const r = await telegramRequest("sendMessage", {
+        chat_id: p.profile.telegramUserId,
+        text,
+        parse_mode: "HTML",
+        reply_markup,
+        disable_web_page_preview: true,
+      });
+
+      if (!r?.ok) {
+        console.error("Resend link failed:", {
+          to: p.profile.telegramUserId,
+          partner: partner.telegramUserId,
+          error: r,
+        });
+        skipped++;
+        continue;
+      }
+
+      sent++;
+    } catch (e) {
+      console.error("Resend link exception:", e);
+      skipped++;
+    }
   }
+
+  redirect(
+    `/${locale}/tg-admin/random-coffee?resend=ok` +
+      `&date=${encodeURIComponent(safeDate)}` +
+      `&sent=${encodeURIComponent(String(sent))}` +
+      `&matched=${encodeURIComponent(String(matchedParticipations.length))}` +
+      `&skipped=${encodeURIComponent(String(skipped))}`
+  );
 }
 
 export default async function RandomCoffeeAdminPage({
@@ -250,7 +388,10 @@ export default async function RandomCoffeeAdminPage({
           <div>
             <div className="text-sm font-semibold text-gray-900">⚡️ Быстрые действия</div>
             <div className="text-xs text-gray-500 mt-1">
-              Можно дослать кнопки «Написать» по уже смэтченным парам за выбранную дату.
+              Дослать кнопки «Написать» по уже смэтченным парам за выбранную дату (MATCHED).
+              <br />
+              Максимально надёжно: если у партнёра есть <b>username</b> — уходит кнопка на <code>https://t.me/username</code>.
+              Если username нет — уходит HTML-ссылка <code>tg://user?id=</code>.
             </div>
           </div>
 
@@ -278,7 +419,8 @@ export default async function RandomCoffeeAdminPage({
         {/* Статус результата */}
         {resendStatus === "ok" && (
           <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
-            ✅ Ссылки досланы за дату <b>{resendDate || "—"}</b>. Отправлено: <b>{resendSent}</b>, matched: <b>{resendMatched}</b>, пропущено: <b>{resendSkipped}</b>.
+            ✅ Ссылки досланы за дату <b>{resendDate || "—"}</b>. Отправлено: <b>{resendSent}</b>, matched:{" "}
+            <b>{resendMatched}</b>, пропущено: <b>{resendSkipped}</b>.
           </div>
         )}
         {resendStatus === "error" && (
@@ -295,9 +437,7 @@ export default async function RandomCoffeeAdminPage({
         </div>
         <div className="p-6 bg-white rounded-xl border shadow-sm">
           <h3 className="text-sm font-medium text-gray-500">Записано на пятницу</h3>
-          <p className="text-3xl font-bold text-blue-600">
-            {activeParticipations.length}
-          </p>
+          <p className="text-3xl font-bold text-blue-600">{activeParticipations.length}</p>
         </div>
         <div className="p-6 bg-white rounded-xl border shadow-sm">
           <h3 className="text-sm font-medium text-gray-500">Всего встреч (в выборке)</h3>
@@ -341,9 +481,7 @@ export default async function RandomCoffeeAdminPage({
                         <td className="px-6 py-4">
                           {p.profile.name}
                           <br />
-                          <span className="text-xs text-gray-400">
-                            ID: {p.profile.telegramUserId}
-                          </span>
+                          <span className="text-xs text-gray-400">ID: {p.profile.telegramUserId}</span>
                         </td>
                         <td className="px-6 py-4">{p.profile.specialty}</td>
                         <td className="px-6 py-4 max-w-xs truncate" title={p.profile.interests}>
@@ -486,9 +624,7 @@ export default async function RandomCoffeeAdminPage({
                           Удалить
                         </button>
                       </form>
-                      <div className="text-[10px] text-gray-400 mt-1">
-                        Удалит также записи участия
-                      </div>
+                      <div className="text-[10px] text-gray-400 mt-1">Удалит также записи участия</div>
                     </td>
                   </tr>
                 ))}
