@@ -92,29 +92,74 @@ export async function GET(req: Request) {
   const now = new Date();
   const dayOfWeek = getWeekdayInTz(now); // считаем в МСК (или CRON_TZ)
 
-  // --- ЧЕТВЕРГ: НАПОМИНАНИЕ ---
-  if (dayOfWeek === 4) {
-    const profiles = await prisma.randomCoffeeProfile.findMany();
+// --- ЧЕТВЕРГ: НАПОМИНАНИЕ (умное) ---
+if (dayOfWeek === 4) {
+  // считаем "завтра" в локальном времени сервера (обычно ок для cron)
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const start = new Date(tomorrow);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(tomorrow);
+  end.setHours(23, 59, 59, 999);
 
-    for (const profile of profiles) {
-      try {
-        await telegramRequest('sendMessage', {
-          chat_id: profile.telegramUserId,
-          text:
-            `👋 Привет! Завтра пятница, а значит — Random Coffee!\n\n` +
-            `Не забудьте подтвердить участие, чтобы мы подобрали вам интересного собеседника.\n\n` +
-            `👇 Нажмите кнопку в боте или перейдите в Mini App.`,
-          reply_markup: {
-            inline_keyboard: [[{ text: '☕️ Участвовать', web_app: { url: MINI_APP_URL } }]],
-          },
-        });
-        await delay(120);
-      } catch (e) {
-        console.error(`Failed to send reminder to ${profile.telegramUserId}`, e);
-      }
+  const profiles = await prisma.randomCoffeeProfile.findMany({
+    select: { telegramUserId: true },
+  });
+
+  // Собираем участия на "завтра" (пятницу)
+  const participations = await prisma.randomCoffeeParticipation.findMany({
+    where: {
+      matchDate: { gte: start, lte: end },
+      // сюда подставь свои актуальные статусы "подтверждено"
+      // у тебя в пятницу ты используешь status: 'PAID'
+      status: { in: ['PAID', 'MATCHED'] },
+    },
+    select: { profile: { select: { telegramUserId: true } } },
+  });
+
+  const confirmed = new Set<string>(participations.map(p => p.profile.telegramUserId));
+
+  let sentNeedConfirm = 0;
+  let sentAlreadyIn = 0;
+
+  for (const profile of profiles) {
+    const isConfirmed = confirmed.has(profile.telegramUserId);
+
+    const textNeedConfirm =
+      `👋 Привет! Завтра пятница, а значит — Random Coffee!\n\n` +
+      `Не забудьте подтвердить участие, чтобы мы подобрали вам интересного собеседника.\n\n` +
+      `👇 Нажмите кнопку в боте или перейдите в Mini App.`;
+
+    const textAlreadyIn =
+      `✅ Вы уже подтвердили участие в Random Coffee на этой неделе.\n\n` +
+      `Завтра мы подберем вам пару и пришлём контакт собеседника.\n\n` +
+      `Если хотите изменить данные анкеты — откройте Mini App и обновите профиль.`;
+
+    try {
+      await telegramRequest('sendMessage', {
+        chat_id: profile.telegramUserId,
+        text: isConfirmed ? textAlreadyIn : textNeedConfirm,
+        reply_markup: {
+          inline_keyboard: [[{ text: isConfirmed ? '☕️ Открыть Mini App' : '☕️ Участвовать', web_app: { url: MINI_APP_URL } }]],
+        },
+      });
+
+      if (isConfirmed) sentAlreadyIn++;
+      else sentNeedConfirm++;
+
+      await delay(120);
+    } catch (e) {
+      console.error(`Failed to send reminder to ${profile.telegramUserId}`, e);
     }
-    return NextResponse.json({ status: 'Reminders sent', count: profiles.length });
   }
+
+  return NextResponse.json({
+    status: 'Reminders sent',
+    total: profiles.length,
+    alreadyConfirmed: sentAlreadyIn,
+    needConfirm: sentNeedConfirm,
+  });
+}
 
   // --- ПЯТНИЦА: УМНОЕ РАСПРЕДЕЛЕНИЕ ---
   if (dayOfWeek === 5) {
