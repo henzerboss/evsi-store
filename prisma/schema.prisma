@@ -1,5 +1,3 @@
-// file: prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,36 +12,39 @@ model Application {
   slug    String @unique
   iconUrl String
 
-  // Поля для английского языка
   title_en        String?
   description_en  String?
-  shortDescription_en String? // <-- НОВОЕ ПОЛЕ
+  shortDescription_en String?
 
-  // Поля для испанского языка
   title_es        String?
   description_es  String?
-  shortDescription_es String? // <-- НОВОЕ ПОЛЕ
+  shortDescription_es String?
 
-  // Поля для русского языка
   title_ru        String?
   description_ru  String?
-  shortDescription_ru String? // <-- НОВОЕ ПОЛЕ
+  shortDescription_ru String?
 
-  // Ссылки на сторы и GitHub
   appStoreUrl   String?
   googlePlayUrl String?
   githubUrl     String?
 
-  // Политика конфиденциальности
   privacyPolicy_en String?
 
-  // Временные метки
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
+// --- SETTINGS (NEW) ---
+// Одна строка настроек (singleton). В SQLite это работает нормально.
+model TgSettings {
+  id                     Int      @id @default(1)
+  vacancyBasePriceStars  Int      @default(0)  // базовая цена публикации вакансии
+  resumeBasePriceStars   Int      @default(0)  // базовая цена публикации резюме
+  channelDiscountPercent Int      @default(0)  // скидка на ВСЕ каналы в %
+  updatedAt              DateTime @updatedAt
+}
 
-// --- НОВЫЕ МОДЕЛИ ДЛЯ TELEGRAM ---
+// --- TELEGRAM MODELS ---
 
 model TgChannel {
   id          String   @id @default(cuid())
@@ -56,27 +57,23 @@ model TgChannel {
   orders      TgOrderChannel[]
 }
 
-// Enum поддерживаются в Postgres/MySQL. Если используете SQLite, удалите enum и используйте String в модели
-// Для SQLite enum не работает нативно, Prisma эмулирует его, но лучше проверить.
-// Если возникнет ошибка с Enum на SQLite, замените тип поля в модели на String.
-
 model TgOrder {
   id                      String   @id @default(cuid())
   telegramUserId          String
   telegramUsername        String?
-  
-  type                    String   @default("VACANCY") // "VACANCY" | "RESUME"
-  
-  payload                 String   @default("{}") 
+
+  type                    String   @default("VACANCY") // "VACANCY" | "RESUME" | "RANDOM_COFFEE" | "RESUME_AI"
+
+  payload                 String   @default("{}")
   totalAmount             Int
-  status                  String   @default("PENDING") // "PENDING", "PAID_WAITING_MODERATION", "PUBLISHED", "REJECTED_REFUNDED"
-  
-  telegramPaymentChargeId String?       
+  status                  String   @default("PENDING") // "PENDING", "PAID_WAITING_MODERATION", "PUBLISHED", "REJECTED_REFUNDED", etc.
+
+  telegramPaymentChargeId String?
   paymentId               String?
 
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
-  
+
   channels                TgOrderChannel[]
 }
 
@@ -94,14 +91,14 @@ model TgOrderChannel {
 
 model RandomCoffeeProfile {
   id             String   @id @default(cuid())
-  telegramUserId String   @unique // ID пользователя Telegram
+  telegramUserId String   @unique
   name           String
   specialty      String
   interests      String
   linkedin       String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  
+
   participations RandomCoffeeParticipation[]
 }
 
@@ -109,16 +106,14 @@ model RandomCoffeeParticipation {
   id             String   @id @default(cuid())
   profileId      String
   profile        RandomCoffeeProfile @relation(fields: [profileId], references: [id])
-  
+
   status         String   @default("PAID") // PAID, MATCHED, REFUNDED
-  matchDate      DateTime // Дата пятницы, на которую записан
-  
-  telegramPaymentChargeId String? // Для возврата средств
-  
+  matchDate      DateTime
+
+  telegramPaymentChargeId String?
   createdAt      DateTime @default(now())
-  
-  // Связь с парой (если распределен)
-  matchWithId    String?  // ID профиля партнера
+
+  matchWithId    String?
 }
 
 model RandomCoffeeHistory {
@@ -127,17 +122,15 @@ model RandomCoffeeHistory {
   userBId   String
   date      DateTime @default(now())
 
-  @@unique([userAId, userBId]) // Чтобы быстро проверять, были ли они уже вместе
+  @@unique([userAId, userBId])
 }
 
-// Новая модель для хранения профиля пользователя и черновиков
 model TgUserProfile {
   id             String   @id @default(cuid())
   telegramUserId String   @unique
-  
-  // Черновики резюме (храним как JSON строки)
-  resumeOriginal  String? 
+
+  resumeOriginal  String?
   resumeCorrected String?
-  
+
   updatedAt      DateTime @updatedAt
 }

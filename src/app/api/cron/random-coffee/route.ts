@@ -8,7 +8,7 @@ const globalForPrisma = global as unknown as { prisma: PrismaClient };
 const prisma = globalForPrisma.prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
-const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 /**
  * Важно:
@@ -23,10 +23,7 @@ const CRON_TZ = process.env.CRON_TZ || 'Europe/Moscow';
 
 function sanitizeForHtml(str: string | undefined | null): string {
   if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function safeUsername(u?: string | null): string | null {
@@ -36,14 +33,40 @@ function safeUsername(u?: string | null): string | null {
 }
 
 function getWeekdayInTz(date = new Date(), timeZone = CRON_TZ): number {
-  // 0..6 (Sun..Sat) but computed in given timezone
-  // We convert to weekday string and map
   const wd = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(date);
   const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   return map[wd] ?? date.getDay();
 }
 
-// Локальные типы (как у тебя)
+function startEndOfTomorrowInTz(timeZone = CRON_TZ) {
+  // Получаем "завтра" и границы дня, ориентируясь на timezone
+  // Делаем через форматирование даты в TZ, чтобы не зависеть от TZ сервера.
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+
+  const y = Number(parts.find((p) => p.type === 'year')?.value);
+  const m = Number(parts.find((p) => p.type === 'month')?.value);
+  const d = Number(parts.find((p) => p.type === 'day')?.value);
+
+  // Создаем "полночь сегодня" как UTC-дату, затем добавим сутки
+  const todayUtc = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+  const tomorrowUtc = new Date(todayUtc);
+  tomorrowUtc.setUTCDate(tomorrowUtc.getUTCDate() + 1);
+
+  const start = new Date(tomorrowUtc);
+  const end = new Date(tomorrowUtc);
+  end.setUTCHours(23, 59, 59, 999);
+
+  // В БД у тебя matchDate хранится как DateTime (обычно в UTC). Мы подаем UTC границы.
+  return { start, end };
+}
+
+// Локальные типы
 interface Profile {
   id: string;
   telegramUserId: string;
@@ -70,8 +93,7 @@ interface Edge {
 // Функция подсчета пересечений интересов
 function calculateInterestOverlap(s1: string, s2: string): number {
   if (!s1 || !s2) return 0;
-  const getWords = (s: string) =>
-    new Set(s.toLowerCase().split(/[\s,.-]+/).filter(w => w.length > 2));
+  const getWords = (s: string) => new Set(s.toLowerCase().split(/[\s,.-]+/).filter((w) => w.length > 2));
 
   const words1 = getWords(s1);
   const words2 = getWords(s2);
@@ -90,76 +112,77 @@ export async function GET(req: Request) {
   }
 
   const now = new Date();
-  const dayOfWeek = getWeekdayInTz(now); // считаем в МСК (или CRON_TZ)
+  const dayOfWeek = getWeekdayInTz(now); // 0..6 (Sun..Sat) в CRON_TZ
 
-// --- ЧЕТВЕРГ: НАПОМИНАНИЕ (умное) ---
-if (dayOfWeek === 4) {
-  // считаем "завтра" в локальном времени сервера (обычно ок для cron)
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const start = new Date(tomorrow);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(tomorrow);
-  end.setHours(23, 59, 59, 999);
+  // --- ЧЕТВЕРГ: НАПОМИНАНИЕ (умное) ---
+  if (dayOfWeek === 4) {
+    const { start, end } = startEndOfTomorrowInTz(CRON_TZ);
 
-  const profiles = await prisma.randomCoffeeProfile.findMany({
-    select: { telegramUserId: true },
-  });
+    // ✅ FIX 1: правильная модель randomCoffeeProfile
+    const profiles = await prisma.randomCoffeeProfile.findMany({
+      select: { telegramUserId: true },
+    });
 
-  // Собираем участия на "завтра" (пятницу)
-  const participations = await prisma.randomCoffeeParticipation.findMany({
-    where: {
-      matchDate: { gte: start, lte: end },
-      // сюда подставь свои актуальные статусы "подтверждено"
-      // у тебя в пятницу ты используешь status: 'PAID'
-      status: { in: ['PAID', 'MATCHED'] },
-    },
-    select: { profile: { select: { telegramUserId: true } } },
-  });
+    // Собираем участия на "завтра" (пятницу)
+    const participations = await prisma.randomCoffeeParticipation.findMany({
+      where: {
+        matchDate: { gte: start, lte: end },
+        status: { in: ['PAID', 'MATCHED'] },
+      },
+      select: { profile: { select: { telegramUserId: true } } },
+    });
 
-  const confirmed = new Set<string>(participations.map(p => p.profile.telegramUserId));
+    const confirmed = new Set<string>(participations.map((p) => p.profile.telegramUserId));
 
-  let sentNeedConfirm = 0;
-  let sentAlreadyIn = 0;
+    let sentNeedConfirm = 0;
+    let sentAlreadyIn = 0;
 
-  for (const profile of profiles) {
-    const isConfirmed = confirmed.has(profile.telegramUserId);
+    // ✅ FIX 2: profiles существует
+    for (const profile of profiles) {
+      const isConfirmed = confirmed.has(profile.telegramUserId);
 
-    const textNeedConfirm =
-      `👋 Привет! Завтра пятница, а значит — Random Coffee!\n\n` +
-      `Не забудьте подтвердить участие, чтобы мы подобрали вам интересного собеседника.\n\n` +
-      `👇 Нажмите кнопку в боте или перейдите в Mini App.`;
+      const textNeedConfirm =
+        `👋 Привет! Завтра пятница, а значит — Random Coffee!\n\n` +
+        `Не забудьте подтвердить участие, чтобы мы подобрали вам интересного собеседника.\n\n` +
+        `👇 Нажмите кнопку или откройте Mini App.`;
 
-    const textAlreadyIn =
-      `✅ Вы уже подтвердили участие в Random Coffee на этой неделе.\n\n` +
-      `Завтра мы подберем вам пару и пришлём контакт собеседника.\n\n` +
-      `Если хотите изменить данные анкеты — откройте Mini App и обновите профиль.`;
+      const textAlreadyIn =
+        `✅ Вы уже подтвердили участие в Random Coffee на этой неделе.\n\n` +
+        `Завтра мы подберем вам пару и пришлём контакт собеседника.\n\n` +
+        `Если хотите изменить анкету — откройте Mini App и обновите профиль.`;
 
-    try {
-      await telegramRequest('sendMessage', {
-        chat_id: profile.telegramUserId,
-        text: isConfirmed ? textAlreadyIn : textNeedConfirm,
-        reply_markup: {
-          inline_keyboard: [[{ text: isConfirmed ? '☕️ Открыть Mini App' : '☕️ Участвовать', web_app: { url: MINI_APP_URL } }]],
-        },
-      });
+      try {
+        await telegramRequest('sendMessage', {
+          chat_id: profile.telegramUserId,
+          text: isConfirmed ? textAlreadyIn : textNeedConfirm,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: isConfirmed ? '☕️ Открыть Mini App' : '☕️ Участвовать',
+                  web_app: { url: MINI_APP_URL },
+                },
+              ],
+            ],
+          },
+        });
 
-      if (isConfirmed) sentAlreadyIn++;
-      else sentNeedConfirm++;
+        if (isConfirmed) sentAlreadyIn++;
+        else sentNeedConfirm++;
 
-      await delay(120);
-    } catch (e) {
-      console.error(`Failed to send reminder to ${profile.telegramUserId}`, e);
+        await delay(120);
+      } catch (e) {
+        console.error(`Failed to send reminder to ${profile.telegramUserId}`, e);
+      }
     }
-  }
 
-  return NextResponse.json({
-    status: 'Reminders sent',
-    total: profiles.length,
-    alreadyConfirmed: sentAlreadyIn,
-    needConfirm: sentNeedConfirm,
-  });
-}
+    return NextResponse.json({
+      status: 'Reminders sent',
+      total: profiles.length,
+      alreadyConfirmed: sentAlreadyIn,
+      needConfirm: sentNeedConfirm,
+    });
+  }
 
   // --- ПЯТНИЦА: УМНОЕ РАСПРЕДЕЛЕНИЕ ---
   if (dayOfWeek === 5) {
@@ -175,11 +198,10 @@ if (dayOfWeek === 4) {
         status: 'PAID',
       },
       include: { profile: true },
-    })) as ParticipationWithProfile[];
+    })) as unknown as ParticipationWithProfile[];
 
     // --- ДОП: username из TgOrder для кликабельных ссылок https://t.me/<username> ---
-    // делаем сразу после получения participations, чтобы использовать ниже в рассылках
-    const userIds = participations.map(p => p.profile.telegramUserId);
+    const userIds = participations.map((p) => p.profile.telegramUserId);
 
     const orders = userIds.length
       ? await prisma.tgOrder.findMany({
@@ -207,7 +229,6 @@ if (dayOfWeek === 4) {
         const link = `https://t.me/${uname}`;
         return `<a href="${link}">Написать в Telegram</a>`;
       }
-      // fallback: показываем ID, потому что tg:// часто не кликается
       return `Telegram ID: <code>${sanitizeForHtml(telegramUserId)}</code>`;
     };
 
@@ -215,45 +236,49 @@ if (dayOfWeek === 4) {
       // Если меньше 2 человек, возвращаем деньги всем (0 или 1)
       for (const p of participations) {
         if (p.telegramPaymentChargeId) {
-          await telegramRequest('refundStarPayment', {
-            user_id: parseInt(p.profile.telegramUserId, 10),
-            telegram_payment_charge_id: p.telegramPaymentChargeId,
-          });
+          try {
+            await telegramRequest('refundStarPayment', {
+              user_id: parseInt(p.profile.telegramUserId, 10),
+              telegram_payment_charge_id: p.telegramPaymentChargeId,
+            });
 
-          await telegramRequest('sendMessage', {
-            chat_id: p.profile.telegramUserId,
-            text:
-              `😔 К сожалению, на этой неделе недостаточно участников для пары.\n\n` +
-              `Мы вернули вам ${RC_PRICE_STARS} звезд. Попробуйте на следующей неделе!`,
-          });
+            await telegramRequest('sendMessage', {
+              chat_id: p.profile.telegramUserId,
+              text:
+                `😔 К сожалению, на этой неделе недостаточно участников для пары.\n\n` +
+                `Мы вернули вам ${RC_PRICE_STARS} звезд. Попробуйте на следующей неделе!`,
+            });
 
-          await prisma.randomCoffeeParticipation.update({
-            where: { id: p.id },
-            data: { status: 'REFUNDED' },
-          });
+            await prisma.randomCoffeeParticipation.update({
+              where: { id: p.id },
+              data: { status: 'REFUNDED' },
+            });
 
-          await delay(120);
+            await delay(120);
+          } catch (e) {
+            console.error('Refund flow failed for', p.profile.telegramUserId, e);
+          }
         }
       }
       return NextResponse.json({ status: 'Not enough participants', refunds: participations.length });
     }
 
     // 2. Получаем историю встреч для текущих участников
-    const profileIds = participations.map(p => p.profileId);
+    const profileIds = participations.map((p) => p.profileId);
     const history = await prisma.randomCoffeeHistory.findMany({
       where: {
         OR: [{ userAId: { in: profileIds } }, { userBId: { in: profileIds } }],
       },
     });
 
-    // Создаем Set запрещенных пар: "id1:id2" (где id1 < id2 алфавитно)
+    // Set запрещенных пар: "id1:id2" (где id1 < id2)
     const forbiddenPairs = new Set<string>();
     for (const h of history) {
       const [u, v] = [h.userAId, h.userBId].sort();
       forbiddenPairs.add(`${u}:${v}`);
     }
 
-    // 3. Строим граф возможных ребер с весами
+    // 3. Строим граф ребер с весами
     const edges: Edge[] = [];
 
     // Перемешиваем участников для случайности при равных весах
@@ -267,7 +292,6 @@ if (dayOfWeek === 4) {
         const u = participations[i];
         const v = participations[j];
 
-        // Проверяем историю
         const [id1, id2] = [u.profileId, v.profileId].sort();
         if (forbiddenPairs.has(`${id1}:${id2}`)) continue;
 
@@ -278,7 +302,6 @@ if (dayOfWeek === 4) {
       }
     }
 
-    // Сортируем ребра по весу (по убыванию)
     edges.sort((a, b) => b.weight - a.weight);
 
     // 4. Жадный выбор пар
@@ -293,8 +316,8 @@ if (dayOfWeek === 4) {
       }
     }
 
-    // 5. Обработка оставшихся (Refund)
-    const leftovers = participations.filter(p => !matchedProfileIds.has(p.profileId));
+    // 5. Оставшиеся (Refund)
+    const leftovers = participations.filter((p) => !matchedProfileIds.has(p.profileId));
 
     // 6. Сохранение и рассылка
     for (const [p1, p2] of pairs) {
@@ -355,24 +378,28 @@ if (dayOfWeek === 4) {
 
     for (const left of leftovers) {
       if (left.telegramPaymentChargeId) {
-        await telegramRequest('refundStarPayment', {
-          user_id: parseInt(left.profile.telegramUserId, 10),
-          telegram_payment_charge_id: left.telegramPaymentChargeId,
-        });
+        try {
+          await telegramRequest('refundStarPayment', {
+            user_id: parseInt(left.profile.telegramUserId, 10),
+            telegram_payment_charge_id: left.telegramPaymentChargeId,
+          });
 
-        await telegramRequest('sendMessage', {
-          chat_id: left.profile.telegramUserId,
-          text:
-            `😔 К сожалению, на этой неделе нечетное количество участников или для вас не нашлось пары, ` +
-            `с которой вы еще не встречались.\n\nМы вернули вам ${RC_PRICE_STARS} звезд. Попробуйте на следующей неделе!`,
-        });
+          await telegramRequest('sendMessage', {
+            chat_id: left.profile.telegramUserId,
+            text:
+              `😔 К сожалению, на этой неделе нечетное количество участников или для вас не нашлось пары, ` +
+              `с которой вы еще не встречались.\n\nМы вернули вам ${RC_PRICE_STARS} звезд. Попробуйте на следующей неделе!`,
+          });
 
-        await prisma.randomCoffeeParticipation.update({
-          where: { id: left.id },
-          data: { status: 'REFUNDED' },
-        });
+          await prisma.randomCoffeeParticipation.update({
+            where: { id: left.id },
+            data: { status: 'REFUNDED' },
+          });
 
-        await delay(120);
+          await delay(120);
+        } catch (e) {
+          console.error('Refund flow failed for', left.profile.telegramUserId, e);
+        }
       }
     }
 
