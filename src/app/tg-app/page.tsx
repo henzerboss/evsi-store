@@ -420,7 +420,6 @@ const Step3Channels = ({
       {Object.entries(grouped).map(([cat, list]) => (
         <div key={cat}>
           <h3 className="text-xs font-bold text-gray-400 uppercase mb-3 ml-1">{cat}</h3>
-
           <div className="bg-white rounded-2xl overflow-hidden shadow-sm divide-y divide-gray-100">
             {list.map((ch) => {
               const isSelected = selectedIds.includes(ch.id);
@@ -430,50 +429,36 @@ const Step3Channels = ({
                 <div
                   key={ch.id}
                   onClick={() => setSelectedIds((prev) => (prev.includes(ch.id) ? prev.filter((i) => i !== ch.id) : [...prev, ch.id]))}
-                  className={`p-4 cursor-pointer transition active:bg-gray-50 ${isSelected ? "bg-blue-50/50" : ""}`}
+                  className={`p-4 flex items-center justify-between cursor-pointer transition active:bg-gray-50 ${isSelected ? "bg-blue-50/50" : ""}`}
                 >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={`mt-0.5 shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition ${
-                        isSelected ? "bg-blue-500 border-blue-500" : "border-gray-300"
-                      }`}
-                    >
+                  <div className="flex items-center gap-3 min-w-0 flex-1 pr-3">
+                    <div className={`w-5 h-5 flex-shrink-0 rounded-full border flex items-center justify-center transition ${isSelected ? "bg-blue-500 border-blue-500" : "border-gray-300"}`}>
                       {isSelected && <CheckCircle />}
                     </div>
-
-                    {/* Main row: name/username + price block */}
-                    <div className="flex-1 min-w-0 flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-gray-900 truncate">{ch.name}</div>
-                        <div className="text-xs text-gray-400 truncate">{ch.username}</div>
-                      </div>
-
-                      {/* Price: fixed width, wraps nicely on narrow screens */}
-                      <div className="shrink-0 flex flex-col items-end gap-1">
-                        <div className="flex items-center gap-2">
-                          {discountPercent > 0 && (
-                            <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-1 rounded-full whitespace-nowrap">
-                              -{discountPercent}%
-                            </span>
-                          )}
-                          <div className="flex flex-col items-end leading-none">
-                            {discountPercent > 0 && (
-                              <div className="text-[10px] text-gray-400 line-through whitespace-nowrap">⭐️ {ch.priceStars}</div>
-                            )}
-                            <div className="text-xs font-bold bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full whitespace-nowrap">
-                              ⭐️ {discounted}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* On very narrow screens show original/discount info more compactly */}
-                        {discountPercent > 0 && (
-                          <div className="sm:hidden text-[10px] text-gray-400 whitespace-nowrap">
-                            было {ch.priceStars} → стало {discounted}
-                          </div>
-                        )}
-                      </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-gray-900 truncate">{ch.name}</div>
+                      <div className="text-xs text-gray-400 truncate">{ch.username}</div>
                     </div>
+                  </div>
+
+                  <div className="flex flex-col items-end flex-shrink-0 gap-1">
+                    {discountPercent > 0 ? (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-md">
+                            -{discountPercent}%
+                          </span>
+                          <span className="text-[10px] text-gray-400 line-through">⭐️ {ch.priceStars}</span>
+                        </div>
+                        <div className="text-xs font-bold bg-yellow-100 text-yellow-700 px-2.5 py-1 rounded-full whitespace-nowrap">
+                          ⭐️ {discounted}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-xs font-bold bg-yellow-100 text-yellow-700 px-2.5 py-1 rounded-full whitespace-nowrap">
+                        ⭐️ {ch.priceStars}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -908,7 +893,7 @@ export default function TgAppPage() {
   if (loading) return <div>Loading...</div>;
 
   return (
-    <div className="min-h-screen font-sans bg-[#f3f4f6] text-gray-900 pb-24">
+    <div className="min-h-screen font-sans bg-[#f3f4f6] text-gray-900 pb-32">
       <div className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b px-4 py-3 flex items-center justify-between">
         {step > 1 ? (
           <button onClick={goBack} className="p-1 -ml-2 rounded-full hover:bg-gray-100">
@@ -979,42 +964,37 @@ export default function TgAppPage() {
         )}
       </div>
 
-      {/* Bottom bar: simplified + wider */}
       {step > 1 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-4 safe-area-bottom z-30 shadow-lg">
-          <div className="mx-auto max-w-2xl w-full flex items-center gap-3">
-            {/* Total only (no "К оплате/База/Каналы") */}
-            {(activeTab !== "RANDOM_COFFEE" ? (step === 3 || step === 4) : step === 4) && (
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] text-gray-400">Итого</div>
-                <div className="flex items-center justify-between mt-0.5">
-                  <div className="text-base font-bold text-gray-900 truncate">⭐️ {totalPrice}</div>
-                  {activeTab !== "RANDOM_COFFEE" && discountPercent > 0 && (
-                    <span className="hidden sm:inline text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-1 rounded-full whitespace-nowrap">
-                      -{discountPercent}% на каналы
-                    </span>
-                  )}
-                </div>
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 pb-8 z-30 shadow-[0_-8px_20px_-5px_rgba(0,0,0,0.1)]">
+          <div className="max-w-xl mx-auto flex items-center gap-5">
+            
+            {(step === 3 || step === 4) && (
+              <div className="flex flex-col justify-center min-w-[70px]">
+                <span className="text-xs text-gray-500 font-medium">Итого</span>
+                <span className="text-xl font-bold text-gray-900 leading-none mt-1">⭐️ {totalPrice}</span>
               </div>
             )}
 
-            {step === 4 && activeTab === "RANDOM_COFFEE" && isParticipating ? (
-              <button onClick={handleCancel} className="w-full bg-red-50 text-red-600 border border-red-200 font-bold py-3 px-6 rounded-xl">
-                Отменить
-              </button>
-            ) : (
-              <button
-                onClick={step === 4 ? handlePay : goNext}
-                disabled={step === 3 && !selectedIds.length && activeTab !== "RANDOM_COFFEE"}
-                className="bg-blue-600 text-white font-bold py-3 px-6 rounded-xl w-full disabled:opacity-50"
-              >
-                {step === 2 && activeTab === "RESUME" && aiChanges && aiChanges.length > 0
-                  ? `Далее (${resumeMode === "ORIGINAL" ? "Ориг." : "Испр."})`
-                  : step === 4
-                    ? "Оплатить"
-                    : "Далее"}
-              </button>
-            )}
+            <div className="flex-1">
+              {step === 4 && activeTab === "RANDOM_COFFEE" && isParticipating ? (
+                <button onClick={handleCancel} className="w-full bg-red-50 text-red-600 border border-red-200 font-bold py-3.5 px-6 rounded-xl transition active:scale-95">
+                  Отменить участие
+                </button>
+              ) : (
+                <button
+                  onClick={step === 4 ? handlePay : goNext}
+                  disabled={step === 3 && !selectedIds.length && activeTab !== "RANDOM_COFFEE"}
+                  className="bg-blue-600 text-white font-bold py-3.5 px-6 rounded-xl w-full transition active:scale-95 disabled:opacity-50 disabled:active:scale-100"
+                >
+                  {step === 2 && activeTab === "RESUME" && aiChanges && aiChanges.length > 0
+                    ? `Далее (${resumeMode === "ORIGINAL" ? "Ориг." : "Испр."})`
+                    : step === 4
+                      ? "Оплатить"
+                      : "Далее"}
+                </button>
+              )}
+            </div>
+            
           </div>
         </div>
       )}
