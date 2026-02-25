@@ -252,7 +252,7 @@ const Step2Form = ({
   isAiLoading,
   aiAvailable,
   hasCorrectedVersion,
-  resumeAiPrice = 50,
+  resumeAiPrice = 10,
 }: Step2Props) => {
   const renderInput = (field: string, placeholder: string, multiline = false) => {
     const dataRecord = data as unknown as Record<string, string>;

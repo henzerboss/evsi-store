@@ -9,7 +9,7 @@ const prisma = globalForPrisma.prisma || new PrismaClient();
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 // --- ENV-driven price (kept) ---
-const DEFAULT_RESUME_AI_PRICE = 50;
+const DEFAULT_RESUME_AI_PRICE = 10;
 
 const getResumeAiPrice = () => {
   const raw = process.env.RESUME_AI_PRICE_STARS;
