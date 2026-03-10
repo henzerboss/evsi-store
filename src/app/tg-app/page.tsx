@@ -426,7 +426,7 @@ const Step3Channels = ({
     <div className="space-y-6 pb-20">
       {aiSuggested && (
         <div className="bg-blue-50 border border-blue-100 text-blue-800 p-4 rounded-xl text-sm">
-          \u0418\u0418 \u043f\u043e\u0434\u043e\u0431\u0440\u0430\u043b \u043f\u043e\u0434\u0445\u043e\u0434\u044f\u0449\u0438\u0435 \u043a\u0430\u043d\u0430\u043b\u044b \u0434\u043b\u044f \u0432\u0430\u0448\u0435\u0439 \u0432\u0430\u043a\u0430\u043d\u0441\u0438\u0438 \u0438\u043b\u0438 \u0440\u0435\u0437\u044e\u043c\u0435. \u0412\u044b \u043c\u043e\u0436\u0435\u0442\u0435 \u0438\u0437\u043c\u0435\u043d\u0438\u0442\u044c \u0432\u044b\u0431\u043e\u0440.
+          ИИ подобрал подходящие каналы для вашей вакансии или резюме. Вы можете изменить выбор.
         </div>
       )}
 
@@ -874,7 +874,7 @@ export default function TgAppPage() {
   const goNext = async () => {
     if (step === 2 && !validateForm()) return;
     if (step === 3 && activeTab !== "RANDOM_COFFEE" && selectedIds.length === 0) {
-      window.Telegram?.WebApp?.showAlert("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0445\u043e\u0442\u044f \u0431\u044b \u043e\u0434\u0438\u043d \u043a\u0430\u043d\u0430\u043b");
+      window.Telegram?.WebApp?.showAlert("Выберите хотя бы один канал");
       return;
     }
     if (step === 2 && activeTab !== "RANDOM_COFFEE") {
@@ -1042,18 +1042,18 @@ export default function TgAppPage() {
                 </button>
               ) : (
                 <button
-                  onClick={step === 4 ? handlePay : goNext}
-                  disabled={isChannelRecommendationLoading || (step === 3 && !selectedIds.length && activeTab !== "RANDOM_COFFEE")}
-                  className="bg-blue-600 text-white font-bold py-3.5 px-6 rounded-xl w-full transition active:scale-95 disabled:opacity-50 disabled:active:scale-100"
-                >
-                  {isChannelRecommendationLoading
-                    ? "\u041f\u043e\u0434\u0431\u0438\u0440\u0430\u0435\u043c \u043a\u0430\u043d\u0430\u043b\u044b..."
-                    : step === 2 && activeTab === "RESUME" && aiChanges && aiChanges.length > 0
-                      ? `\u0414\u0430\u043b\u0435\u0435 (${resumeMode === "ORIGINAL" ? "\u041e\u0440\u0438\u0433." : "\u0418\u0418"})`
-                      : step === 4
-                        ? "\u041e\u043f\u043b\u0430\u0442\u0438\u0442\u044c"
-                        : "\u0414\u0430\u043b\u0435\u0435"}
-                </button>
+  onClick={step === 4 ? handlePay : goNext}
+  disabled={isChannelRecommendationLoading || (step === 3 && !selectedIds.length && activeTab !== "RANDOM_COFFEE")}
+  className="bg-blue-600 text-white font-bold py-3.5 px-6 rounded-xl w-full transition active:scale-95 disabled:opacity-50 disabled:active:scale-100"
+>
+  {isChannelRecommendationLoading
+    ? "Подбираем каналы..."
+    : step === 2 && activeTab === "RESUME" && aiChanges && aiChanges.length > 0
+      ? `Далее (${resumeMode === "ORIGINAL" ? "Ориг." : "ИИ"})`
+      : step === 4
+        ? "Оплатить"
+        : "Далее"}
+</button>
               )}
             </div>
             
