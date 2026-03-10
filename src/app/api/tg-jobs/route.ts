@@ -35,6 +35,15 @@ interface ResumeData {
   contacts: string;
 }
 
+interface VacancyData {
+  title: string;
+  company: string;
+  salary: string;
+  location: string;
+  description: string;
+  contacts: string;
+}
+
 interface AIChange {
   field: string;
   what_fixed: string;
@@ -44,6 +53,11 @@ interface AIChange {
 interface AIResult {
   resume: ResumeData;
   changes: AIChange[];
+}
+
+interface ChannelRecommendationResult {
+  selectedIds: string[];
+  reason?: string;
 }
 
 // --- Helpers ---
@@ -171,10 +185,108 @@ ATS:
 
   try {
     return JSON.parse(text) as AIResult;
-  } catch (e) {
+  } catch {
     console.error("JSON Parse Error:", text);
     throw new Error("Invalid JSON from AI");
   }
+}
+
+
+async function recommendChannels(params: {
+  type: "VACANCY" | "RESUME";
+  payload: VacancyData | ResumeData;
+  channels: TgChannel[];
+}): Promise<ChannelRecommendationResult> {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_RESUME;
+  if (!apiKey) throw new Error("API Key not configured");
+
+  const { type, payload, channels } = params;
+  const maxRecommendations = Math.min(5, channels.length);
+
+  const payloadText =
+    type === "VACANCY"
+      ? (() => {
+          const vacancy = payload as VacancyData;
+          return [
+            `Type: vacancy`,
+            `Title: ${vacancy.title || "-"}`,
+            `Company: ${vacancy.company || "-"}`,
+            `Salary: ${vacancy.salary || "-"}`,
+            `Location: ${vacancy.location || "-"}`,
+            `Description: ${vacancy.description || "-"}`,
+            `Contacts: ${vacancy.contacts || "-"}`,
+          ].join("\n");
+        })()
+      : (() => {
+          const resume = payload as ResumeData;
+          return [
+            `Type: resume`,
+            `Title: ${resume.title || "-"}`,
+            `Salary: ${resume.salary || "-"}`,
+            `Experience: ${resume.experience || "-"}`,
+            `Skills: ${resume.skills || "-"}`,
+            `Description: ${resume.description || "-"}`,
+            `Contacts: ${resume.contacts || "-"}`,
+          ].join("\n");
+        })();
+
+  const channelsText = channels
+    .map(
+      (channel) =>
+        `ID: ${channel.id}\nName: ${channel.name}\nCategory: ${channel.category}\nUsername: ${channel.username}\nPriceStars: ${channel.priceStars}`
+    )
+    .join("\n\n---\n\n");
+
+  const prompt = `
+You recommend Telegram channels for publishing a vacancy or resume.
+
+Task:
+1. Analyze the post text.
+2. Select only the most relevant channels from the list.
+3. Do not select every channel.
+4. Select between 1 and ${maxRecommendations} channels only if they are genuinely relevant.
+5. If there are no confident matches, return an empty array.
+
+Return strict JSON only:
+{
+  "selectedIds": ["id1", "id2"],
+  "reason": "short reason"
+}
+
+Post data:
+${payloadText}
+
+Available channels:
+${channelsText}
+`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json" },
+      }),
+    }
+  );
+
+  if (!response.ok) throw new Error("Gemini API Error");
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("No content generated");
+
+  const parsed = JSON.parse(text) as ChannelRecommendationResult;
+  const validIds = new Set(channels.map((channel) => channel.id));
+  const selectedIds = Array.isArray(parsed.selectedIds)
+    ? parsed.selectedIds.filter((id) => typeof id === "string" && validIds.has(id)).slice(0, maxRecommendations)
+    : [];
+
+  return {
+    selectedIds,
+    reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
+  };
 }
 
 // --- Handlers ---
@@ -448,6 +560,40 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "recommend_channels") {
+    const { type, payload } = body;
+
+    if (type !== "VACANCY" && type !== "RESUME") {
+      return NextResponse.json({ ok: false, selectedIds: [] });
+    }
+
+    try {
+      const channels = (await prisma.tgChannel.findMany({
+        where: { isActive: true },
+        orderBy: { category: "asc" },
+      })) as TgChannel[];
+
+      if (!channels.length) {
+        return NextResponse.json({ ok: false, selectedIds: [] });
+      }
+
+      const result = await recommendChannels({
+        type,
+        payload,
+        channels,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        selectedIds: result.selectedIds,
+        reason: result.reason,
+      });
+    } catch (e) {
+      console.error("Channel recommendation failed:", e);
+      return NextResponse.json({ ok: false, selectedIds: [] });
+    }
   }
 
   // --- CREATE INVOICE ---

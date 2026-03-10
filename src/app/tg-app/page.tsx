@@ -92,6 +92,11 @@ interface AIChange {
   why: string;
 }
 
+interface ChannelRecommendationState {
+  formKey: string | null;
+  applied: boolean;
+}
+
 type TgSettings = {
   vacancyBasePriceStars: number;
   resumeBasePriceStars: number;
@@ -403,11 +408,13 @@ const Step3Channels = ({
   selectedIds,
   setSelectedIds,
   discountPercent,
+  aiSuggested,
 }: {
   channels: Channel[];
   selectedIds: string[];
   setSelectedIds: Dispatch<SetStateAction<string[]>>;
   discountPercent: number;
+  aiSuggested: boolean;
 }) => {
   const grouped = channels.reduce((acc: Record<string, Channel[]>, ch) => {
     if (!acc[ch.category]) acc[ch.category] = [];
@@ -417,6 +424,12 @@ const Step3Channels = ({
 
   return (
     <div className="space-y-6 pb-20">
+      {aiSuggested && (
+        <div className="bg-blue-50 border border-blue-100 text-blue-800 p-4 rounded-xl text-sm">
+          ?? ???????? ?????????? ?????? ??? ????? ???????? ??? ??????. ?? ?????? ???????? ?????.
+        </div>
+      )}
+
       {Object.entries(grouped).map(([cat, list]) => (
         <div key={cat}>
           <h3 className="text-xs font-bold text-gray-400 uppercase mb-3 ml-1">{cat}</h3>
@@ -448,15 +461,15 @@ const Step3Channels = ({
                           <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-md">
                             -{discountPercent}%
                           </span>
-                          <span className="text-[10px] text-gray-400 line-through">⭐️ {ch.priceStars}</span>
+                          <span className="text-[10px] text-gray-400 line-through">XTR {ch.priceStars}</span>
                         </div>
                         <div className="text-xs font-bold bg-yellow-100 text-yellow-700 px-2.5 py-1 rounded-full whitespace-nowrap">
-                          ⭐️ {discounted}
+                          XTR {discounted}
                         </div>
                       </>
                     ) : (
                       <div className="text-xs font-bold bg-yellow-100 text-yellow-700 px-2.5 py-1 rounded-full whitespace-nowrap">
-                        ⭐️ {ch.priceStars}
+                        XTR {ch.priceStars}
                       </div>
                     )}
                   </div>
@@ -464,12 +477,6 @@ const Step3Channels = ({
               );
             })}
           </div>
-
-          {discountPercent > 0 && (
-            <div className="text-[11px] text-gray-400 mt-2 ml-1">
-              Скидка применяется к каждому каналу. Итог считается по сниженным ценам.
-            </div>
-          )}
         </div>
       ))}
     </div>
@@ -581,6 +588,11 @@ export default function TgAppPage() {
   const [lastAiInputSnapshot, setLastAiInputSnapshot] = useState<string | null>(null);
   const [aiChanges, setAiChanges] = useState<AIChange[]>([]);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isChannelRecommendationLoading, setIsChannelRecommendationLoading] = useState(false);
+  const [channelRecommendation, setChannelRecommendation] = useState<ChannelRecommendationState>({
+    formKey: null,
+    applied: false,
+  });
 
   const getActiveData = (): AnyFormData => {
     if (activeTab === "VACANCY") return vacancyForm;
@@ -816,10 +828,57 @@ export default function TgAppPage() {
     return true;
   };
 
-  const goNext = () => {
+  const getChannelRecommendationKey = () => JSON.stringify({ type: activeTab, payload: getActiveData() });
+
+  const prepareChannelStep = async () => {
+    const recommendationKey = getChannelRecommendationKey();
+    if (channelRecommendation.formKey === recommendationKey) {
+      setStep(3);
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    setIsChannelRecommendationLoading(true);
+    try {
+      const response = await fetch("/api/tg-jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "recommend_channels",
+          type: activeTab,
+          payload: getActiveData(),
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      const aiSelectedIds = Array.isArray(data?.selectedIds) ? data.selectedIds : [];
+
+      setSelectedIds(aiSelectedIds);
+      setChannelRecommendation({
+        formKey: recommendationKey,
+        applied: Boolean(data?.ok && aiSelectedIds.length > 0),
+      });
+    } catch (e) {
+      console.error("Failed to recommend channels:", e);
+      setSelectedIds([]);
+      setChannelRecommendation({
+        formKey: recommendationKey,
+        applied: false,
+      });
+    } finally {
+      setIsChannelRecommendationLoading(false);
+      setStep(3);
+      window.scrollTo(0, 0);
+    }
+  };
+
+  const goNext = async () => {
     if (step === 2 && !validateForm()) return;
     if (step === 3 && activeTab !== "RANDOM_COFFEE" && selectedIds.length === 0) {
-      window.Telegram?.WebApp?.showAlert("Выберите канал");
+      window.Telegram?.WebApp?.showAlert("???????? ???? ?? ???? ?????");
+      return;
+    }
+    if (step === 2 && activeTab !== "RANDOM_COFFEE") {
+      await prepareChannelStep();
       return;
     }
     const nextStep = step === 2 && activeTab === "RANDOM_COFFEE" ? 4 : step + 1;
@@ -952,6 +1011,7 @@ export default function TgAppPage() {
               selectedIds={selectedIds}
               setSelectedIds={setSelectedIds}
               discountPercent={discountPercent}
+              aiSuggested={channelRecommendation.applied}
             />
           </>
         )}
@@ -983,14 +1043,16 @@ export default function TgAppPage() {
               ) : (
                 <button
                   onClick={step === 4 ? handlePay : goNext}
-                  disabled={step === 3 && !selectedIds.length && activeTab !== "RANDOM_COFFEE"}
+                  disabled={isChannelRecommendationLoading || (step === 3 && !selectedIds.length && activeTab !== "RANDOM_COFFEE")}
                   className="bg-blue-600 text-white font-bold py-3.5 px-6 rounded-xl w-full transition active:scale-95 disabled:opacity-50 disabled:active:scale-100"
                 >
-                  {step === 2 && activeTab === "RESUME" && aiChanges && aiChanges.length > 0
-                    ? `Далее (${resumeMode === "ORIGINAL" ? "Ориг." : "Испр."})`
-                    : step === 4
-                      ? "Оплатить"
-                      : "Далее"}
+                  {isChannelRecommendationLoading
+                    ? "????????? ??????..."
+                    : step === 2 && activeTab === "RESUME" && aiChanges && aiChanges.length > 0
+                      ? `????? (${resumeMode === "ORIGINAL" ? "????." : "??"})`
+                      : step === 4
+                        ? "????????"
+                        : "?????"}
                 </button>
               )}
             </div>
