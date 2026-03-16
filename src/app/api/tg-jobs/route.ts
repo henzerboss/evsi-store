@@ -1,5 +1,3 @@
-// file: src/app/api/tg-jobs/route.ts
-
 import { NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
 import { telegramRequest } from "@/lib/telegram";
@@ -42,6 +40,13 @@ interface VacancyData {
   location: string;
   description: string;
   contacts: string;
+}
+
+interface RandomCoffeePayload {
+  rcName?: string;
+  rcSpecialty?: string;
+  rcInterests?: string;
+  rcLinkedin?: string;
 }
 
 interface AIChange {
@@ -104,6 +109,40 @@ function getNextFriday() {
   d.setDate(d.getDate() + daysToAdd);
   d.setHours(10, 0, 0, 0);
   return d;
+}
+
+function extractOrderMeta(type: string, payload: unknown): { itemTitle: string | null; customerContact: string | null } {
+  const data = (payload || {}) as Record<string, unknown>;
+
+  if (type === "VACANCY") {
+    return {
+      itemTitle: typeof data.title === "string" ? data.title : "Вакансия",
+      customerContact: typeof data.contacts === "string" ? data.contacts : null,
+    };
+  }
+
+  if (type === "RESUME") {
+    return {
+      itemTitle: typeof data.title === "string" ? data.title : "Резюме",
+      customerContact: typeof data.contacts === "string" ? data.contacts : null,
+    };
+  }
+
+  if (type === "RESUME_AI") {
+    return {
+      itemTitle: typeof data.title === "string" ? `AI-резюме: ${data.title}` : "AI-улучшение резюме",
+      customerContact: typeof data.contacts === "string" ? data.contacts : null,
+    };
+  }
+
+  if (type === "RANDOM_COFFEE") {
+    return {
+      itemTitle: typeof data.rcName === "string" ? `Random Coffee: ${data.rcName}` : "Random Coffee",
+      customerContact: typeof data.rcLinkedin === "string" ? data.rcLinkedin : null,
+    };
+  }
+
+  return { itemTitle: null, customerContact: null };
 }
 
 async function generateImprovedResume(resumeData: ResumeData): Promise<AIResult> {
@@ -190,7 +229,6 @@ ATS:
     throw new Error("Invalid JSON from AI");
   }
 }
-
 
 async function recommendChannels(params: {
   type: "VACANCY" | "RESUME";
@@ -361,7 +399,6 @@ export async function GET(req: Request) {
       orderBy: { category: "asc" },
     });
 
-    // Возвращаем объект, чтобы фронт видел настройки
     return NextResponse.json({
       settings: {
         vacancyBasePriceStars: settings.vacancyBasePriceStars,
@@ -406,6 +443,7 @@ export async function POST(req: Request) {
   if (body.action === "create_ai_invoice") {
     const price = getResumeAiPrice();
     const { userId, payload } = body;
+    const meta = extractOrderMeta("RESUME_AI", payload);
 
     const order = await prisma.tgOrder.create({
       data: {
@@ -415,6 +453,8 @@ export async function POST(req: Request) {
         payload: JSON.stringify(payload),
         totalAmount: price,
         status: "PENDING",
+        itemTitle: meta.itemTitle,
+        customerContact: meta.customerContact,
         channels: { create: [] },
       },
     });
@@ -446,7 +486,13 @@ export async function POST(req: Request) {
       const originalData = JSON.parse(order.payload) as ResumeData;
       const aiResult = await generateImprovedResume(originalData);
 
-      await prisma.tgOrder.update({ where: { id: orderId }, data: { status: "PUBLISHED" } });
+      await prisma.tgOrder.update({
+        where: { id: orderId },
+        data: {
+          status: "PUBLISHED",
+          moderatedAt: new Date(),
+        },
+      });
 
       await prisma.tgUserProfile.upsert({
         where: { telegramUserId: order.telegramUserId },
@@ -516,7 +562,13 @@ export async function POST(req: Request) {
           user_id: parseInt(order.telegramUserId, 10),
           telegram_payment_charge_id: order.telegramPaymentChargeId,
         });
-        await prisma.tgOrder.update({ where: { id: orderId }, data: { status: "REFUNDED" } });
+        await prisma.tgOrder.update({
+          where: { id: orderId },
+          data: {
+            status: "REFUNDED",
+            refundedAt: new Date(),
+          },
+        });
         await telegramRequest("sendMessage", {
           chat_id: order.telegramUserId,
           text: `⚠️ Произошла ошибка при генерации AI-резюме. Мы вернули вам ${price} звезд.`,
@@ -625,6 +677,8 @@ export async function POST(req: Request) {
       totalAmount = base + sumChannelsDiscounted;
     }
 
+    const meta = extractOrderMeta(type, payload);
+
     const order = await prisma.tgOrder.create({
       data: {
         telegramUserId: String(userId),
@@ -633,6 +687,8 @@ export async function POST(req: Request) {
         payload: JSON.stringify(payload),
         totalAmount: totalAmount,
         status: "PENDING",
+        itemTitle: meta.itemTitle,
+        customerContact: meta.customerContact,
         channels: { create: type === "RANDOM_COFFEE" ? [] : channelIds.map((id: string) => ({ channelId: id })) },
       },
     });
@@ -661,12 +717,22 @@ export async function POST(req: Request) {
     const payment = body.message.successful_payment;
     const orderId = payment.invoice_payload;
 
+    const existingOrder = await prisma.tgOrder.findUnique({ where: { id: orderId } });
+    if (!existingOrder) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
+
+    const payloadData = safeJson(existingOrder.payload);
+    const meta = extractOrderMeta(existingOrder.type, payloadData);
+
     const updatedOrder = await prisma.tgOrder.update({
       where: { id: orderId },
       data: {
         status: "PAID_WAITING_MODERATION",
         paymentId: payment.provider_payment_charge_id,
         telegramPaymentChargeId: payment.telegram_payment_charge_id,
+        itemTitle: meta.itemTitle ?? existingOrder.itemTitle,
+        customerContact: meta.customerContact ?? existingOrder.customerContact,
       },
     });
 
@@ -675,20 +741,36 @@ export async function POST(req: Request) {
     const adminChatId = process.env.TELEGRAM_ADMIN_ID;
 
     if (updatedOrder.type === "RANDOM_COFFEE") {
-      const data = JSON.parse(updatedOrder.payload);
+      const data = JSON.parse(updatedOrder.payload) as RandomCoffeePayload;
       const userId = updatedOrder.telegramUserId;
 
       const profile = await prisma.randomCoffeeProfile.upsert({
         where: { telegramUserId: userId },
-        update: { name: data.rcName, specialty: data.rcSpecialty, interests: data.rcInterests, linkedin: data.rcLinkedin },
-        create: { telegramUserId: userId, name: data.rcName, specialty: data.rcSpecialty, interests: data.rcInterests, linkedin: data.rcLinkedin },
+        update: {
+          name: data.rcName || "",
+          specialty: data.rcSpecialty || "",
+          interests: data.rcInterests || "",
+          linkedin: data.rcLinkedin || null,
+        },
+        create: {
+          telegramUserId: userId,
+          name: data.rcName || "",
+          specialty: data.rcSpecialty || "",
+          interests: data.rcInterests || "",
+          linkedin: data.rcLinkedin || null,
+        },
       });
 
       const nextFriday = getNextFriday();
       const dateStr = nextFriday.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
 
       await prisma.randomCoffeeParticipation.create({
-        data: { profileId: profile.id, matchDate: nextFriday, status: "PAID", telegramPaymentChargeId: payment.telegram_payment_charge_id },
+        data: {
+          profileId: profile.id,
+          matchDate: nextFriday,
+          status: "PAID",
+          telegramPaymentChargeId: payment.telegram_payment_charge_id,
+        },
       });
 
       await telegramRequest("sendMessage", {
@@ -731,6 +813,8 @@ export async function POST(req: Request) {
             `🔥 <b>Новая заявка на модерацию!</b>\n\n` +
             `<b>Тип:</b> ${updatedOrder.type === "VACANCY" ? "💼 Вакансия" : "👤 Резюме"}\n` +
             `<b>Пользователь:</b> @${updatedOrder.telegramUsername || updatedOrder.telegramUserId}\n` +
+            `<b>Товар:</b> ${sanitizeForHtml(updatedOrder.itemTitle || "-")}\n` +
+            `<b>Контакт:</b> ${sanitizeForHtml(updatedOrder.customerContact || "-")}\n` +
             `<b>Сумма:</b> ${updatedOrder.totalAmount} ⭐️\n` +
             `<b>ID заказа:</b> <code>${updatedOrder.id}</code>`,
           parse_mode: "HTML",

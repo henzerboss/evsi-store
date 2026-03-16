@@ -12,17 +12,17 @@ model Application {
   slug    String @unique
   iconUrl String
 
-  title_en        String?
-  description_en  String?
-  shortDescription_en String?
+  title_en             String?
+  description_en       String?
+  shortDescription_en  String?
 
-  title_es        String?
-  description_es  String?
-  shortDescription_es String?
+  title_es             String?
+  description_es       String?
+  shortDescription_es  String?
 
-  title_ru        String?
-  description_ru  String?
-  shortDescription_ru String?
+  title_ru             String?
+  description_ru       String?
+  shortDescription_ru  String?
 
   appStoreUrl   String?
   googlePlayUrl String?
@@ -34,55 +34,63 @@ model Application {
   updatedAt DateTime @updatedAt
 }
 
-// --- SETTINGS (NEW) ---
-// Одна строка настроек (singleton). В SQLite это работает нормально.
+// --- SETTINGS ---
 model TgSettings {
   id                     Int      @id @default(1)
-  vacancyBasePriceStars  Int      @default(0)  // базовая цена публикации вакансии
-  resumeBasePriceStars   Int      @default(0)  // базовая цена публикации резюме
-  channelDiscountPercent Int      @default(0)  // скидка на ВСЕ каналы в %
+  vacancyBasePriceStars  Int      @default(0)
+  resumeBasePriceStars   Int      @default(0)
+  channelDiscountPercent Int      @default(0)
   updatedAt              DateTime @updatedAt
 }
 
 // --- TELEGRAM MODELS ---
 
 model TgChannel {
-  id          String   @id @default(cuid())
-  name        String
-  username    String   @unique
-  category    String
-  priceStars  Int
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  orders      TgOrderChannel[]
+  id         String   @id @default(cuid())
+  name       String
+  username   String   @unique
+  category   String
+  priceStars Int
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  orders TgOrderChannel[]
 }
 
 model TgOrder {
-  id                      String   @id @default(cuid())
-  telegramUserId          String
-  telegramUsername        String?
+  id               String  @id @default(cuid())
+  telegramUserId   String
+  telegramUsername String?
 
-  type                    String   @default("VACANCY") // "VACANCY" | "RESUME" | "RANDOM_COFFEE" | "RESUME_AI"
+  type String @default("VACANCY") // "VACANCY" | "RESUME" | "RANDOM_COFFEE" | "RESUME_AI"
 
-  payload                 String   @default("{}")
-  totalAmount             Int
-  status                  String   @default("PENDING") // "PENDING", "PAID_WAITING_MODERATION", "PUBLISHED", "REJECTED_REFUNDED", etc.
+  payload     String @default("{}")
+  totalAmount Int
+  status      String @default("PENDING") // PENDING, PAID_WAITING_MODERATION, PUBLISHED, REJECTED_REFUNDED, REFUNDED_BY_ADMIN, REFUNDED, etc.
 
   telegramPaymentChargeId String?
   paymentId               String?
 
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  // --- NEW FIELDS FOR ADMIN / REFUNDS ---
+  itemTitle       String?
+  customerContact String?
+  publishedLinks  String? // JSON stringified string[]
+  moderatedAt     DateTime?
+  refundedAt      DateTime?
 
-  channels                TgOrderChannel[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  channels TgOrderChannel[]
 }
 
 model TgOrderChannel {
   id        String    @id @default(cuid())
   orderId   String
   channelId String
-  order     TgOrder   @relation(fields: [orderId], references: [id])
-  channel   TgChannel @relation(fields: [channelId], references: [id])
+
+  order   TgOrder   @relation(fields: [orderId], references: [id])
+  channel TgChannel @relation(fields: [channelId], references: [id])
 
   @@unique([orderId, channelId])
 }
@@ -103,34 +111,34 @@ model RandomCoffeeProfile {
 }
 
 model RandomCoffeeParticipation {
-  id             String   @id @default(cuid())
-  profileId      String
-  profile        RandomCoffeeProfile @relation(fields: [profileId], references: [id])
+  id        String @id @default(cuid())
+  profileId String
+  profile   RandomCoffeeProfile @relation(fields: [profileId], references: [id])
 
-  status         String   @default("PAID") // PAID, MATCHED, REFUNDED
-  matchDate      DateTime
+  status    String   @default("PAID") // PAID, MATCHED, REFUNDED, REFUNDED_BY_USER
+  matchDate DateTime
 
   telegramPaymentChargeId String?
-  createdAt      DateTime @default(now())
+  createdAt DateTime @default(now())
 
-  matchWithId    String?
+  matchWithId String?
 }
 
 model RandomCoffeeHistory {
-  id        String   @id @default(cuid())
-  userAId   String
-  userBId   String
-  date      DateTime @default(now())
+  id      String   @id @default(cuid())
+  userAId String
+  userBId String
+  date    DateTime @default(now())
 
   @@unique([userAId, userBId])
 }
 
 model TgUserProfile {
-  id             String   @id @default(cuid())
-  telegramUserId String   @unique
+  id             String @id @default(cuid())
+  telegramUserId String @unique
 
   resumeOriginal  String?
   resumeCorrected String?
 
-  updatedAt      DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 }

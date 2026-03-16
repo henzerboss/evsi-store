@@ -6,7 +6,7 @@ if (!TELEGRAM_BOT_TOKEN) {
   throw new Error("TELEGRAM_BOT_TOKEN is not defined");
 }
 
-type TelegramMethod = 'sendMessage' | 'createInvoiceLink' | 'answerPreCheckoutQuery' | 'refundStarPayment';
+type TelegramMethod = 'sendMessage' | 'createInvoiceLink' | 'answerPreCheckoutQuery' | 'refundStarPayment' | "deleteMessage";
 
 interface TelegramResponse<T> {
   ok: boolean;
