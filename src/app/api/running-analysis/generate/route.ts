@@ -1,5 +1,4 @@
-// src/app/api/running-analysis/generate/route.ts
-export const runtime = 'nodejs'; // важно: не edge
+export const runtime = 'nodejs';
 
 function cors(origin: string) {
   return {
@@ -17,17 +16,79 @@ export async function OPTIONS(req: Request) {
   });
 }
 
+type StaticAnalysisMetric = {
+  key: string;
+  value: number;
+  unit: 'deg' | 'cm' | 'ms' | 'spm' | 'm' | 'pct' | 'norm';
+};
+
+type StaticAnalysisFrame = {
+  order: number;
+  side: 'left' | 'right';
+  phaseKey: 'initial_contact' | 'midsupport' | 'toe_off' | 'terminal_swing' | 'max_knee_drive';
+  eventKey: string;
+  frameIndex: number;
+  timestampMs: number;
+  mimeType: string;
+  imageBase64: string;
+  localMetrics: StaticAnalysisMetric[];
+};
+
+type StaticAnalysisRequest = {
+  language: string;
+  prompt: string;
+  selectedFrames: StaticAnalysisFrame[];
+};
+
 type GenerateRunningAnalysisRequest = {
-  analysisJson: unknown;
+  analysisJson?: unknown;
   language?: string;
   runnerContext?: {
     goal?: string;
     audience?: string;
     desiredStyle?: string;
   };
+  staticAnalysisRequest?: StaticAnalysisRequest;
 };
 
-const SYSTEM_PROMPT = `
+const STATIC_SYSTEM_PROMPT = `
+You are an expert running biomechanics analyst.
+
+You will receive 10 chronologically connected stop-frames from a running video, covering both legs and the phases:
+- initial_contact
+- midsupport
+- toe_off
+- terminal_swing
+- max_knee_drive
+
+Rules:
+- Use the images as the primary evidence.
+- Use localMetrics only as supporting hints.
+- Estimate static technique metrics conservatively.
+- Do not fabricate certainty.
+- Do not return dynamic metrics such as cadence, GCT, flight time, vertical oscillation, step length, or symmetry.
+- Return JSON only.
+
+Return this exact schema:
+{
+  "average_sections": [
+    {
+      "key": "initial_contact|midsupport|toe_off|terminal_swing|max_knee_drive",
+      "metrics": [
+        {
+          "key": "string",
+          "value": 0,
+          "unit": "deg|cm|norm"
+        }
+      ]
+    }
+  ],
+  "conclusion": "string",
+  "raw_response_json": "optional string"
+}
+`.trim();
+
+const COACH_REPORT_SYSTEM_PROMPT = `
 You are an experienced running coach and biomechanics analyst.
 
 Your job is to turn structured running-analysis metrics into a clear, practical, trustworthy coaching report for a runner.
@@ -44,50 +105,10 @@ Goals:
 - If a metric is unreliable or missing, say so briefly and move on.
 - Focus on useful coaching insights, not generic filler.
 
-Important interpretation rules:
-- Cadence, step timing symmetry, trunk lean, joint angles, overstriding, movement symmetry, and basic event timing are usually the most useful metrics.
-- Ground contact time, flight time, stride length, and foot strike pattern may be less reliable depending on confidence and video quality.
-- A mild issue should not be framed as a serious problem.
-- If asymmetry is small, say it is small.
-- If the data is generally good, say so.
-- Give recommendations tied directly to the metrics.
-- Avoid long theoretical explanations unless necessary for clarity.
-
 You must produce valid JSON only, with no markdown and no extra commentary.
-
-Return JSON with this exact schema:
-{
-  "summary": "string",
-  "overall_assessment": {
-    "technique_status": "efficient|generally_good|mixed|needs_attention",
-    "confidence": "high|medium|low",
-    "main_message": "string"
-  },
-  "top_findings": [
-    {
-      "title": "string",
-      "severity": "low|medium|high",
-      "confidence": "high|medium|low",
-      "why_it_matters": "string",
-      "evidence": ["string"],
-      "recommendation": "string"
-    }
-  ],
-  "strengths": ["string"],
-  "limitations": ["string"],
-  "action_plan": [
-    {
-      "focus": "string",
-      "cue": "string",
-      "drill": "string",
-      "expected_benefit": "string"
-    }
-  ],
-  "coach_note": "string"
-}
 `.trim();
 
-function buildUserPrompt(input: GenerateRunningAnalysisRequest) {
+function buildCoachPrompt(input: GenerateRunningAnalysisRequest) {
   const language = input.language ?? 'Russian';
   const goal = input.runnerContext?.goal ?? 'improve running technique and reduce injury risk';
   const audience = input.runnerContext?.audience ?? 'recreational runner';
@@ -102,22 +123,45 @@ Runner context:
 - Desired style: ${desiredStyle}
 - Language: ${language}
 
-Interpret the metrics conservatively.
-Use high-confidence metrics as primary evidence.
-Use low-confidence metrics only as tentative observations.
-If the data quality is insufficient for a claim, mention that briefly in limitations.
-
 Running analysis JSON:
 ${JSON.stringify(input.analysisJson, null, 2)}
 `.trim();
 }
 
+function buildStaticPrompt(input: StaticAnalysisRequest) {
+  return {
+    role: 'user',
+    parts: [
+      { text: input.prompt },
+      ...input.selectedFrames.flatMap((frame) => ([
+        {
+          text: JSON.stringify({
+            order: frame.order,
+            side: frame.side,
+            phaseKey: frame.phaseKey,
+            eventKey: frame.eventKey,
+            frameIndex: frame.frameIndex,
+            timestampMs: frame.timestampMs,
+            localMetrics: frame.localMetrics,
+          }),
+        },
+        {
+          inlineData: {
+            mimeType: frame.mimeType,
+            data: frame.imageBase64,
+          },
+        },
+      ])),
+    ],
+  };
+}
+
 export async function POST(req: Request) {
   const headers = cors(req.headers.get('origin') ?? '');
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY_RUN;
 
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY missing' }), {
+    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY_RUN missing' }), {
       status: 500,
       headers: { ...headers, 'Content-Type': 'application/json' },
     });
@@ -144,8 +188,20 @@ export async function POST(req: Request) {
     });
   }
 
-  if (!body?.analysisJson) {
+  const systemPrompt = body.staticAnalysisRequest ? STATIC_SYSTEM_PROMPT : COACH_REPORT_SYSTEM_PROMPT;
+  const contents = body.staticAnalysisRequest
+    ? [buildStaticPrompt(body.staticAnalysisRequest)]
+    : [{ role: 'user', parts: [{ text: buildCoachPrompt(body) }] }];
+
+  if (!body.staticAnalysisRequest && !body.analysisJson) {
     return new Response(JSON.stringify({ error: 'analysisJson is required' }), {
+      status: 400,
+      headers: { ...headers, 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (body.staticAnalysisRequest && body.staticAnalysisRequest.selectedFrames.length < 2) {
+    return new Response(JSON.stringify({ error: 'At least 2 static-analysis frames are required' }), {
       status: 400,
       headers: { ...headers, 'Content-Type': 'application/json' },
     });
@@ -153,32 +209,27 @@ export async function POST(req: Request) {
 
   const geminiPayload = {
     systemInstruction: {
-      parts: [{ text: SYSTEM_PROMPT }],
+      parts: [{ text: systemPrompt }],
     },
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: buildUserPrompt(body) }],
-      },
-    ],
+    contents,
     generationConfig: {
-      temperature: 0.4,
+      temperature: body.staticAnalysisRequest ? 0.2 : 0.4,
       responseMimeType: 'application/json',
     },
   };
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-  const r = await fetch(url, {
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(geminiPayload),
   });
 
-  const text = await r.text();
+  const text = await response.text();
 
   return new Response(text, {
-    status: r.status,
+    status: response.status,
     headers: { ...headers, 'Content-Type': 'application/json' },
   });
 }
