@@ -36,6 +36,7 @@ type StaticAnalysisFrame = {
 
 type StaticAnalysisRequest = {
   language: string;
+  intensityZone?: 'Z1' | 'Z2' | 'Z3' | 'Z4' | 'Z5' | string;
   prompt: string;
   selectedFrames: StaticAnalysisFrame[];
 };
@@ -67,6 +68,8 @@ Rules:
 - Estimate static technique metrics conservatively.
 - Do not fabricate certainty.
 - Do not return dynamic metrics such as cadence, GCT, flight time, vertical oscillation, step length, or symmetry.
+- Consider the supplied intensity zone Z1-Z5 when writing the conclusion: higher zones can reasonably show more range, load, and fatigue; lower zones should be interpreted as easy-effort mechanics.
+- Include static upper-body and ankle metrics when visible: left_elbow_flexion_angle, right_elbow_flexion_angle, left_shoulder_extension, right_shoulder_extension, head_tilt, max_dorsiflexion, left_plantarflexion_toe_off, right_plantarflexion_toe_off.
 - Return JSON only.
 
 Return this exact schema:
@@ -109,7 +112,7 @@ You must produce valid JSON only, with no markdown and no extra commentary.
 `.trim();
 
 function buildCoachPrompt(input: GenerateRunningAnalysisRequest) {
-  const language = input.language ?? 'Russian';
+  const language = input.language ?? 'English';
   const goal = input.runnerContext?.goal ?? 'improve running technique and reduce injury risk';
   const audience = input.runnerContext?.audience ?? 'recreational runner';
   const desiredStyle = input.runnerContext?.desiredStyle ?? 'concise, practical, coach-like';
@@ -132,7 +135,7 @@ function buildStaticPrompt(input: StaticAnalysisRequest) {
   return {
     role: 'user',
     parts: [
-      { text: input.prompt },
+      { text: `Runner context:\n- Language: ${input.language}\n- Intensity zone: ${input.intensityZone ?? 'unknown'}\n\n${input.prompt}` },
       ...input.selectedFrames.flatMap((frame) => ([
         {
           text: JSON.stringify({
