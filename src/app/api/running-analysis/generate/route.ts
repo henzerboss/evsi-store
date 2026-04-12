@@ -16,12 +16,6 @@ export async function OPTIONS(req: Request) {
   });
 }
 
-type StaticAnalysisMetric = {
-  key: string;
-  value: number;
-  unit: 'deg' | 'cm' | 'ms' | 'spm' | 'm' | 'pct' | 'norm';
-};
-
 type StaticAnalysisFrame = {
   order: number;
   side: 'left' | 'right';
@@ -31,7 +25,6 @@ type StaticAnalysisFrame = {
   timestampMs: number;
   mimeType: string;
   imageBase64: string;
-  localMetrics: StaticAnalysisMetric[];
 };
 
 type StaticAnalysisRequest = {
@@ -63,8 +56,7 @@ You will receive 10 chronologically connected stop-frames from a running video, 
 - max_knee_drive
 
 Rules:
-- Use the images as the primary evidence.
-- Use localMetrics only as supporting hints.
+- Use the images as the only evidence for static metric estimation.
 - Estimate static technique metrics conservatively.
 - Do not fabricate certainty.
 - Do not return dynamic metrics such as cadence, GCT, flight time, vertical oscillation, step length, or symmetry.
@@ -145,7 +137,6 @@ function buildStaticPrompt(input: StaticAnalysisRequest) {
             eventKey: frame.eventKey,
             frameIndex: frame.frameIndex,
             timestampMs: frame.timestampMs,
-            localMetrics: frame.localMetrics,
           }),
         },
         {
