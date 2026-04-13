@@ -62,6 +62,27 @@ Rules:
 - Do not return dynamic metrics such as cadence, GCT, flight time, vertical oscillation, step length, or symmetry.
 - Consider the supplied intensity zone Z1-Z5 when writing the conclusion: higher zones can reasonably show more range, load, and fatigue; lower zones should be interpreted as easy-effort mechanics.
 - Include static upper-body and ankle metrics when visible: left_elbow_flexion_angle, right_elbow_flexion_angle, left_shoulder_extension, right_shoulder_extension, head_tilt, max_dorsiflexion, left_plantarflexion_toe_off, right_plantarflexion_toe_off.
+- Return user-facing angles, not raw 2D included angles.
+- Flexion metrics (knee_flexion, max_heel_recovery, swing_knee_angle, left_elbow_flexion_angle, right_elbow_flexion_angle): 0 degrees means straight; calculate as 180 - included joint angle.
+- Max dorsiflexion: calculate as 90 - ankle included angle at midsupport. Example: ankle angle 72 degrees means 18 degrees dorsiflexion.
+- Plantarflexion at toe-off: calculate as ankle included angle - 90. Example: ankle angle 115 degrees means 25 degrees plantarflexion.
+- Lean and tilt metrics (tibia_angle, trunk_lean, pelvic_drop, head_tilt): absolute acute deviation from vertical or horizontal as named; 0 degrees means aligned.
+- Extension metrics (hip_extension, left_shoulder_extension, right_shoulder_extension): estimate how far the thigh or upper arm moves behind the body relative to the trunk line.
+- Foot-to-pelvis distance: horizontal distance from landing foot contact point to pelvis projection, in centimeters. If perspective prevents a reliable centimeter estimate, omit the metric.
+- Coaching target norms by intensity zone:
+  - Dynamic reference only, do not return these: cadence Z1 160/Z2 165/Z3 170/Z4 175/Z5 185 spm; ground contact time 260/240/220/200/180 ms; flight time 90/100/110/120/130 ms; vertical oscillation 8.5/8.0/7.5/7.0/6.5 cm; step length 0.9/1.1/1.25/1.4/1.6 m; symmetry target 0%.
+  - Initial contact: foot_strike_angle 15/10/5/0/0 deg; tibia_angle 6/5/4/2/0 deg; foot_to_pelvis_distance 18/15/12/10/5 cm.
+  - Midsupport: knee_flexion 42 deg; trunk_lean 3/5/7/9/12 deg; pelvic_drop max 4 deg; max_dorsiflexion 18 deg.
+  - Toe-off: hip_extension 10/12/15/18/22 deg; plantarflexion 25 deg.
+  - Terminal swing: max_heel_recovery 90/100/110/125/140 deg.
+  - Max knee drive: hip_flexion 45/55/65/75/90 deg; swing_knee_angle 80 deg; shoulder_extension 30/40/50/60/75 deg.
+  - All phases: elbow_flexion 90 deg; head_tilt 0 deg.
+- Deviation severity for the conclusion: less than 10% from target is excellent, 10-30% is minor, 30-50% is moderate, more than 50% is severe.
+- The conclusion field must be one structured string in the requested language with exactly these 3 titled blocks:
+  1. Interpretation: explain what the data and images suggest about running technique, including objective strengths and weaknesses.
+  2. Risks: mention possible injury risk only when the visible evidence supports it. If there is no reliable injury-risk signal, explicitly say that no clear injury-specific risk is visible from these frames.
+  3. Recommendations: give immediate training advice, strength/mobility exercises, or running drills tied directly to the observed problem areas.
+- Do not invent diagnoses, injuries, or risks. Keep the tone practical, supportive, and conservative.
 - Return JSON only.
 
 Return this exact schema:
