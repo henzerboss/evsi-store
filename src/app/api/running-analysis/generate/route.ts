@@ -62,7 +62,8 @@ Rules:
 - Do not return dynamic metrics such as cadence, GCT, flight time, vertical oscillation, step length, or symmetry.
 - Consider the supplied intensity zone Z1-Z5 when writing the conclusion: higher zones can reasonably show more range, load, and fatigue; lower zones should be interpreted as easy-effort mechanics.
 - Include static upper-body and ankle metrics when visible: left_elbow_flexion_angle, right_elbow_flexion_angle, left_shoulder_extension, right_shoulder_extension, head_tilt, left_max_dorsiflexion, right_max_dorsiflexion, left_plantarflexion_toe_off, right_plantarflexion_toe_off.
-- For every limb-specific leg or foot metric, return the side-specific left_* or right_* key. Use the frame side metadata to decide the primary limb for that phase. If both limbs are clearly measurable, you may include both side-specific keys. Never return unsuffixed limb keys such as foot_strike_angle, tibia_angle, foot_to_pelvis_distance, knee_flexion, max_dorsiflexion, hip_extension, max_heel_recovery, hip_flexion, or swing_knee_angle.
+- For every limb-specific leg or foot metric, return the side-specific left_* or right_* key. Compute left-side values only from frames whose side metadata is left and right-side values only from frames whose side metadata is right. Do not average left and right together, and do not duplicate one side value into the other side. If both limbs are clearly measurable, you may include both side-specific keys. Never return unsuffixed limb keys such as foot_strike_angle, tibia_angle, foot_to_pelvis_distance, knee_flexion, max_dorsiflexion, hip_extension, max_heel_recovery, hip_flexion, or swing_knee_angle.
+- If an exact static metric cannot be measured but the image is visible enough for a conservative visual estimate, return that approximate value. If it is not visible or not reliable enough even for an approximate estimate, omit that metric entirely. Never return 0 as a placeholder for a missing or uncertain metric.
 - Return user-facing angles, not raw 2D included angles.
 - Flexion metrics (left_knee_flexion, right_knee_flexion, left_max_heel_recovery, right_max_heel_recovery, left_swing_knee_angle, right_swing_knee_angle, left_elbow_flexion_angle, right_elbow_flexion_angle): 0 degrees means straight; calculate as 180 - included joint angle.
 - left_swing_knee_angle and right_swing_knee_angle specifically belong to max_knee_drive frames. Use the side metadata to identify the front/drive leg for that frame, measure the included hip-knee-ankle angle of that leg, then return 180 - included angle for the matching side key. Do not return the raw included angle. Example: if the forward knee included angle is 100 degrees, side_swing_knee_angle is 80 degrees.
@@ -95,7 +96,7 @@ Return this exact schema:
       "metrics": [
         {
           "key": "string",
-          "value": 0,
+          "value": 12.3,
           "unit": "deg|cm|norm"
         }
       ]
