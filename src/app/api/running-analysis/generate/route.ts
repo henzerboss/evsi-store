@@ -47,58 +47,46 @@ type GenerateRunningAnalysisRequest = {
 
 const STATIC_SYSTEM_PROMPT = `
 You are an expert running biomechanics analyst.
+You will receive 10 chronologically connected stop-frames from a running video, covering specific phases (initial_contact, midsupport, toe_off, terminal_swing, max_knee_drive) and labeled with the visible side (left/right).
 
-You will receive 10 chronologically connected stop-frames from a running video, covering both legs and the phases:
-- initial_contact
-- midsupport
-- toe_off
-- terminal_swing
-- max_knee_drive
+YOUR MISSION:
+Extract static technique metrics purely from visual evidence. Do not guess dynamic metrics (cadence, GCT, etc.).
 
-Rules:
-- Use the images as the only evidence for static metric estimation.
-- Estimate static technique metrics conservatively.
-- Do not fabricate certainty.
-- Do not return dynamic metrics such as cadence, GCT, flight time, vertical oscillation, step length, or symmetry.
-- Consider the supplied intensity zone Z1-Z5 when writing the conclusion: higher zones can reasonably show more range, load, and fatigue; lower zones should be interpreted as easy-effort mechanics.
-- Include static upper-body and ankle metrics when visible: left_elbow_flexion_angle, right_elbow_flexion_angle, left_shoulder_extension, right_shoulder_extension, head_tilt, left_max_dorsiflexion, right_max_dorsiflexion, left_plantarflexion_toe_off, right_plantarflexion_toe_off.
-- For every limb-specific leg or foot metric, return the side-specific left_* or right_* key. Compute left-side values only from frames whose side metadata is left and right-side values only from frames whose side metadata is right. Do not average left and right together, and do not duplicate one side value into the other side. If both limbs are clearly measurable, you may include both side-specific keys. Never return unsuffixed limb keys such as foot_strike_angle, tibia_angle, foot_to_pelvis_distance, knee_flexion, max_dorsiflexion, hip_extension, max_heel_recovery, hip_flexion, or swing_knee_angle.
-- Treat left and right values as independent measurements from different stop-frames. If left and right look very similar, still estimate each side from its own frame. If you cannot see enough detail to independently estimate one side, omit that side metric instead of copying the other side or using the target norm.
-- If an exact static metric cannot be measured but the image is visible enough for a conservative visual estimate, return that approximate value. If it is not visible or not reliable enough even for an approximate estimate, omit that metric entirely. Never return 0 as a placeholder for a missing or uncertain metric.
-- Return user-facing angles, not raw 2D included angles.
-- Flexion metrics (left_knee_flexion, right_knee_flexion, left_max_heel_recovery, right_max_heel_recovery, left_swing_knee_angle, right_swing_knee_angle, left_elbow_flexion_angle, right_elbow_flexion_angle): 0 degrees means straight; calculate as 180 - included joint angle.
-- left_swing_knee_angle and right_swing_knee_angle specifically belong to max_knee_drive frames. Use the side metadata to identify the front/drive leg for that frame, measure the included hip-knee-ankle angle of that leg, then return 180 - included angle for the matching side key. Do not return the raw included angle. Example: if the forward knee included angle is 100 degrees, side_swing_knee_angle is 80 degrees.
-- left_max_dorsiflexion and right_max_dorsiflexion: calculate as 90 - ankle included angle at midsupport. Example: ankle angle 72 degrees means 18 degrees dorsiflexion.
-- Plantarflexion at toe-off: calculate as ankle included angle - 90. Example: ankle angle 115 degrees means 25 degrees plantarflexion.
-- Lean and tilt metrics (left_tibia_angle, right_tibia_angle, trunk_lean, pelvic_drop, head_tilt): absolute acute deviation from vertical or horizontal as named; 0 degrees means aligned.
-- Extension metrics (left_hip_extension, right_hip_extension, left_shoulder_extension, right_shoulder_extension): estimate how far the thigh or upper arm moves behind the body relative to the trunk line.
-- left_foot_to_pelvis_distance and right_foot_to_pelvis_distance: horizontal distance from the matching landing foot contact point to pelvis projection, in centimeters. If perspective prevents a reliable centimeter estimate, omit the metric.
-- Coaching target norms by intensity zone:
-  - Dynamic reference only, do not return these: cadence Z1 160/Z2 165/Z3 170/Z4 175/Z5 185 spm; ground contact time 260/240/220/200/180 ms; flight time 90/100/110/120/130 ms; vertical oscillation 8.5/8.0/7.5/7.0/6.5 cm; step length 0.9/1.1/1.25/1.4/1.6 m; symmetry target 0%.
-  - Initial contact: left/right foot_strike_angle 15/10/5/0/0 deg; left/right tibia_angle 6/5/4/2/0 deg; left/right foot_to_pelvis_distance 18/15/12/10/5 cm.
-  - Midsupport: left/right knee_flexion 42 deg; trunk_lean 3/5/7/9/12 deg; pelvic_drop max 4 deg; left/right max_dorsiflexion 18 deg.
-  - Toe-off: left/right hip_extension 10/12/15/18/22 deg; left/right plantarflexion 25 deg.
-  - Terminal swing: left/right max_heel_recovery 90/100/110/125/140 deg.
-  - Max knee drive: left/right hip_flexion 45/55/65/75/90 deg; left/right swing_knee_angle 80 deg; left/right shoulder_extension 30/40/50/60/75 deg.
-  - All phases: elbow_flexion 90 deg; head_tilt 0 deg.
-- Deviation severity for the conclusion: less than 10% from target is excellent, 10-30% is minor, 30-50% is moderate, more than 50% is severe.
-- The conclusion field must be one structured string in the requested language with exactly these 3 titled blocks:
-  1. Interpretation: explain what the data and images suggest about running technique, including objective strengths and weaknesses.
-  2. Risks: mention possible injury risk only when the visible evidence supports it. If there is no reliable injury-risk signal, explicitly say that no clear injury-specific risk is visible from these frames.
-  3. Recommendations: give immediate training advice, strength/mobility exercises, or running drills tied directly to the observed problem areas.
-- Do not invent diagnoses, injuries, or risks. Keep the tone practical, supportive, and conservative.
-- Return JSON only.
+CRITICAL RULES FOR METRICS:
+1. NO NORM-FITTING: Read the angles exactly as they appear in the imperfect human runner. Do not adjust your estimates to match "ideal" running forms.
+2. INDEPENDENT SIDES: Treat Left and Right legs as completely independent mechanical systems. Estimate the left-side metrics ONLY from left-side frames, and right-side metrics ONLY from right-side frames. Never copy values between sides.
+3. MANDATORY ESTIMATION: You MUST provide your best visual estimate for every relevant metric in the phase. Only omit a metric if the specific joint/limb is completely cropped out or 100% occluded. Do not omit just because of slight blur.
 
-Return this exact schema:
+ANGLE CALCULATION CHEAT SHEET:
+- 0 degrees = perfectly straight/aligned (for knees, elbows, lean, tilt).
+- Flexion (Knee, Elbow, Swing Knee, Heel Recovery): Calculate as \`180 - included joint angle\`.
+- Dorsiflexion (Midsupport): \`90 - included ankle angle\`.
+- Plantarflexion (Toe-off): \`included ankle angle - 90\`.
+- Lean/Tilt/Drop: Absolute acute deviation from true vertical or horizontal.
+- Extension (Hip, Shoulder): Degrees behind the vertical trunk line.
+- Distance (Foot to pelvis): Horizontal distance in cm (provide best visual estimate based on shoe/body proportions).
+
+PREFIX NAMING:
+Always prefix limb metrics with \`left_\` or \`right_\` based on the frame's metadata (e.g., \`left_knee_flexion\`, \`right_shoulder_extension\`). Use general names for trunk metrics (\`trunk_lean\`, \`pelvic_drop\`, \`head_tilt\`).
+
+CONCLUSION GUIDELINES:
+Base your conclusion on your biomechanical knowledge of the user's intensity zone (Z1-Z5). Higher zones excuse more range/fatigue; lower zones should show easy effort.
+Write a structured string in the requested language with exactly these 3 blocks:
+1. Interpretation: Objective strengths and weaknesses based on the extracted data.
+2. Risks: Mention injury risks ONLY if visible evidence strongly supports it. Otherwise, explicitly state no clear risks are visible.
+3. Recommendations: Immediate, practical training advice or drills tied to the observed problems.
+
+OUTPUT SCHEMA:
+Return strictly valid JSON matching this schema:
 {
-  "average_sections": [
+  "phases": [
     {
-      "key": "initial_contact|midsupport|toe_off|terminal_swing|max_knee_drive",
+      "phase_name": "initial_contact|midsupport|toe_off|terminal_swing|max_knee_drive",
       "metrics": [
         {
-          "key": "string",
+          "key": "string (e.g., left_foot_strike_angle, trunk_lean)",
           "value": 12.3,
-          "unit": "deg|cm|norm"
+          "unit": "deg|cm"
         }
       ]
     }
@@ -111,12 +99,12 @@ Return this exact schema:
 const STATIC_RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: {
-    average_sections: {
+    phases: {
       type: 'ARRAY',
       items: {
         type: 'OBJECT',
         properties: {
-          key: {
+          phase_name: {
             type: 'STRING',
             enum: ['initial_contact', 'midsupport', 'toe_off', 'terminal_swing', 'max_knee_drive'],
           },
@@ -129,7 +117,7 @@ const STATIC_RESPONSE_SCHEMA = {
                 value: { type: 'NUMBER' },
                 unit: {
                   type: 'STRING',
-                  enum: ['deg', 'cm', 'norm'],
+                  enum: ['deg', 'cm'],
                 },
               },
               required: ['key', 'value', 'unit'],
@@ -137,15 +125,15 @@ const STATIC_RESPONSE_SCHEMA = {
             },
           },
         },
-        required: ['key', 'metrics'],
-        propertyOrdering: ['key', 'metrics'],
+        required: ['phase_name', 'metrics'],
+        propertyOrdering: ['phase_name', 'metrics'],
       },
     },
     conclusion: { type: 'STRING' },
     raw_response_json: { type: 'STRING' },
   },
-  required: ['average_sections', 'conclusion'],
-  propertyOrdering: ['average_sections', 'conclusion', 'raw_response_json'],
+  required: ['phases', 'conclusion'],
+  propertyOrdering: ['phases', 'conclusion', 'raw_response_json'],
 } as const;
 
 const COACH_REPORT_SYSTEM_PROMPT = `
