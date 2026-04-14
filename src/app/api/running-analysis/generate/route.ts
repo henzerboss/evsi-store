@@ -63,6 +63,7 @@ Rules:
 - Consider the supplied intensity zone Z1-Z5 when writing the conclusion: higher zones can reasonably show more range, load, and fatigue; lower zones should be interpreted as easy-effort mechanics.
 - Include static upper-body and ankle metrics when visible: left_elbow_flexion_angle, right_elbow_flexion_angle, left_shoulder_extension, right_shoulder_extension, head_tilt, left_max_dorsiflexion, right_max_dorsiflexion, left_plantarflexion_toe_off, right_plantarflexion_toe_off.
 - For every limb-specific leg or foot metric, return the side-specific left_* or right_* key. Compute left-side values only from frames whose side metadata is left and right-side values only from frames whose side metadata is right. Do not average left and right together, and do not duplicate one side value into the other side. If both limbs are clearly measurable, you may include both side-specific keys. Never return unsuffixed limb keys such as foot_strike_angle, tibia_angle, foot_to_pelvis_distance, knee_flexion, max_dorsiflexion, hip_extension, max_heel_recovery, hip_flexion, or swing_knee_angle.
+- Treat left and right values as independent measurements from different stop-frames. If left and right look very similar, still estimate each side from its own frame. If you cannot see enough detail to independently estimate one side, omit that side metric instead of copying the other side or using the target norm.
 - If an exact static metric cannot be measured but the image is visible enough for a conservative visual estimate, return that approximate value. If it is not visible or not reliable enough even for an approximate estimate, omit that metric entirely. Never return 0 as a placeholder for a missing or uncertain metric.
 - Return user-facing angles, not raw 2D included angles.
 - Flexion metrics (left_knee_flexion, right_knee_flexion, left_max_heel_recovery, right_max_heel_recovery, left_swing_knee_angle, right_swing_knee_angle, left_elbow_flexion_angle, right_elbow_flexion_angle): 0 degrees means straight; calculate as 180 - included joint angle.
@@ -106,6 +107,46 @@ Return this exact schema:
   "raw_response_json": "optional string"
 }
 `.trim();
+
+const STATIC_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    average_sections: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          key: {
+            type: 'STRING',
+            enum: ['initial_contact', 'midsupport', 'toe_off', 'terminal_swing', 'max_knee_drive'],
+          },
+          metrics: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                key: { type: 'STRING' },
+                value: { type: 'NUMBER' },
+                unit: {
+                  type: 'STRING',
+                  enum: ['deg', 'cm', 'norm'],
+                },
+              },
+              required: ['key', 'value', 'unit'],
+              propertyOrdering: ['key', 'value', 'unit'],
+            },
+          },
+        },
+        required: ['key', 'metrics'],
+        propertyOrdering: ['key', 'metrics'],
+      },
+    },
+    conclusion: { type: 'STRING' },
+    raw_response_json: { type: 'STRING' },
+  },
+  required: ['average_sections', 'conclusion'],
+  propertyOrdering: ['average_sections', 'conclusion', 'raw_response_json'],
+} as const;
 
 const COACH_REPORT_SYSTEM_PROMPT = `
 You are an experienced running coach and biomechanics analyst.
@@ -240,8 +281,9 @@ export async function POST(req: Request) {
     },
     contents,
     generationConfig: {
-      temperature: body.staticAnalysisRequest ? 0.2 : 0.4,
+      temperature: body.staticAnalysisRequest ? 0 : 0.4,
       responseMimeType: 'application/json',
+      ...(body.staticAnalysisRequest ? { responseSchema: STATIC_RESPONSE_SCHEMA } : {}),
     },
   };
 
