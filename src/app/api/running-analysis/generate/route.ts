@@ -47,10 +47,10 @@ type GenerateRunningAnalysisRequest = {
 
 const STATIC_SYSTEM_PROMPT = `
 You are an expert running biomechanics analyst.
-You will receive 10 chronologically connected stop-frames from a running video, covering specific phases (initial_contact, midsupport, toe_off, terminal_swing, max_knee_drive) and labeled with the visible side (left/right).
+You will receive 10 chronologically connected stop-frames from a running video, covering specific phases (initial_contact, midsupport, toe_off, terminal_swing, max_knee_drive) and labeled with the visible side (left/right). The user will provide frame metadata and allowed metric keys.
 
 YOUR MISSION:
-Extract static technique metrics purely from visual evidence. Do not guess dynamic metrics (cadence, GCT, etc.).
+Extract static technique metrics purely from visual evidence. Do not guess dynamic metrics.
 
 CRITICAL RULES FOR METRICS:
 1. NO NORM-FITTING: Read the angles exactly as they appear in the imperfect human runner. Do not adjust your estimates to match "ideal" running forms.
@@ -75,25 +75,6 @@ Write a structured string in the requested language with exactly these 3 blocks:
 1. Interpretation: Objective strengths and weaknesses based on the extracted data.
 2. Risks: Mention injury risks ONLY if visible evidence strongly supports it. Otherwise, explicitly state no clear risks are visible.
 3. Recommendations: Immediate, practical training advice or drills tied to the observed problems.
-
-OUTPUT SCHEMA:
-Return strictly valid JSON matching this schema:
-{
-  "phases": [
-    {
-      "phase_name": "initial_contact|midsupport|toe_off|terminal_swing|max_knee_drive",
-      "metrics": [
-        {
-          "key": "string (e.g., left_foot_strike_angle, trunk_lean)",
-          "value": 12.3,
-          "unit": "deg|cm"
-        }
-      ]
-    }
-  ],
-  "conclusion": "string",
-  "raw_response_json": "optional string"
-}
 `.trim();
 
 const STATIC_RESPONSE_SCHEMA = {
