@@ -1,8 +1,15 @@
 export const runtime = 'nodejs';
 
-const FREE_MODEL = 'gemini-2.5-flash-lite';
-const PREMIUM_MODEL = 'gemini-3.1-flash-lite-preview';
-const ALLOWED_MODELS = new Set<string>([FREE_MODEL, PREMIUM_MODEL]);
+type AnalyzeInput =
+  | { kind: 'image'; mimeType: string; data: string }
+  | { kind: 'audio'; mimeType: string; data: string }
+  | { kind: 'text'; text: string };
+
+interface AnalyzeRequestBody {
+  model: string;
+  prompt?: string;
+  input: AnalyzeInput;
+}
 
 function cors(origin: string) {
   return {
@@ -14,22 +21,24 @@ function cors(origin: string) {
 }
 
 export async function OPTIONS(req: Request) {
-  return new Response(null, {
-    status: 204,
-    headers: cors(req.headers.get('origin') ?? ''),
-  });
+  return new Response(null, { status: 204, headers: cors(req.headers.get('origin') ?? '') });
 }
 
-interface AnalyzePayload {
-  model?: string;
-  contents?: unknown;
-  generationConfig?: unknown;
-}
+const buildPrompt = (input: AnalyzeInput, customPrompt?: string): string => {
+  if (input.kind === 'text') {
+    return `${customPrompt ?? 'Identify the food and return nutrition JSON.'}\n\nUser description: ${input.text}`;
+  }
+
+  if (input.kind === 'audio') {
+    return customPrompt ?? 'Transcribe the audio, identify the food, estimate weight in grams and return JSON nutrition per 100g.';
+  }
+
+  return customPrompt ?? 'Analyze the food on the image and return JSON nutrition per 100g.';
+};
 
 export async function POST(req: Request) {
   const headers = cors(req.headers.get('origin') ?? '');
   const apiKey = process.env.GEMINI_API_KEY;
-
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'GEMINI_API_KEY missing' }), {
       status: 500,
@@ -46,26 +55,37 @@ export async function POST(req: Request) {
     });
   }
 
-  const payload = (await req.json()) as AnalyzePayload;
-  const model = typeof payload.model === 'string' && ALLOWED_MODELS.has(payload.model)
-    ? payload.model
-    : FREE_MODEL;
+  const body = (await req.json()) as AnalyzeRequestBody;
+  const model = body.model || 'gemini-2.5-flash-lite';
 
-  const forwardPayload = {
-    contents: payload.contents,
-    generationConfig: payload.generationConfig,
+  const parts: Array<Record<string, unknown>> = [{ text: buildPrompt(body.input, body.prompt) }];
+
+  if (body.input.kind === 'image' || body.input.kind === 'audio') {
+    parts.push({
+      inline_data: {
+        mime_type: body.input.mimeType,
+        data: body.input.data,
+      },
+    });
+  }
+
+  const payload = {
+    contents: [{ parts }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      maxOutputTokens: 256,
+      temperature: 0.4,
+    },
   };
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(forwardPayload),
+    body: JSON.stringify(payload),
   });
 
   const text = await response.text();
-
   return new Response(text, {
     status: response.status,
     headers: { ...headers, 'Content-Type': 'application/json' },
