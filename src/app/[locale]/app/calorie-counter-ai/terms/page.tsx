@@ -1,11 +1,10 @@
 // file: src/app/[locale]/app/calorie-counter-ai/terms/page.tsx
-
 export default function TermsPage() {
   return (
     <div className="container max-w-3xl mx-auto py-12 md:py-20 px-4 sm:px-6 lg:px-8">
       <div className="prose dark:prose-invert max-w-none">
         <h1>Terms of Use for AI Calorie Counter by Photo</h1>
-        <p className="text-sm text-muted-foreground">Last Updated: April 18, 2026</p>
+        <p className="text-sm text-muted-foreground">Last Updated: April 27, 2026</p>
 
         <p>
           These Terms of Use govern your access to and use of AI Calorie Counter by Photo
@@ -24,19 +23,20 @@ export default function TermsPage() {
 
         <h2>2. Subscription Service</h2>
         <p>
-          The App offers an optional auto-renewable subscription called <strong>Premium</strong>.
+          The App offers an optional auto-renewable subscription called <strong>Premium</strong>, 
+          available in different billing cycles to suit your needs.
         </p>
         <ul>
           <li>Subscription name: <strong>Premium</strong></li>
-          <li>Subscription length: <strong>1 month</strong></li>
+          <li>Subscription length options: <strong>1 month</strong> or <strong>1 year (Annual)</strong></li>
           <li>Subscription renews automatically unless cancelled before the end of the current billing period</li>
-          <li>Price: <strong>€4.99 per month</strong> or the equivalent price in your local currency, as shown in the App Store</li>
+          <li>Price: <strong>€4.99 per month</strong> or <strong>€29.99 per year</strong> (which offers a 50% discount compared to the monthly plan), or the equivalent price in your local currency, as shown in the App Store or Google Play Store.</li>
         </ul>
 
         <p>Premium currently includes, among other features:</p>
         <ul>
           <li>50 meal analyses per day instead of the Free plan limit</li>
-          <li>Advanced AI model access</li>
+          <li>Advanced AI model access (up to 98% accuracy)</li>
           <li>Food recognition by audio</li>
           <li>Food recognition by text</li>
           <li>All features available in the Free plan</li>
@@ -44,13 +44,13 @@ export default function TermsPage() {
 
         <h2>3. Payment, Renewal, and Cancellation</h2>
         <p>
-          Payment will be charged to your Apple ID account at confirmation of purchase. The
+          Payment will be charged to your Apple ID or Google Play account at confirmation of purchase. The
           subscription renews automatically unless auto-renew is turned off at least 24 hours
           before the end of the current period. Your account will be charged for renewal within
           24 hours prior to the end of the current period.
         </p>
         <p>
-          You can manage and cancel your subscription at any time in your Apple account settings
+          You can manage and cancel your subscription at any time in your Apple or Google account settings
           after purchase. Deleting the App does not automatically cancel your subscription.
         </p>
 
@@ -128,7 +128,7 @@ export default function TermsPage() {
         <p>
           We may suspend or terminate your access to the App if you violate these Terms or if
           required by law. You may stop using the App at any time by uninstalling it and cancelling
-          any active subscription through your Apple account settings.
+          any active subscription through your Apple or Google account settings.
         </p>
 
         <h2>13. Governing Law</h2>
