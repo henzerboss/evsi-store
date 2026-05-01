@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Отправка в Telegram
-    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN_RC}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
