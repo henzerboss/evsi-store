@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. Проверка авторизации (опционально, но рекомендуется)
     const authHeader = request.headers.get('authorization');
     if (authHeader !== process.env.REVENUECAT_WEBHOOK_AUTH) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -11,33 +10,42 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { event } = body;
 
-    // 2. Формируем текст сообщения в зависимости от типа события
-    let message = '';
     const type = event.type;
-    const price = event.price_in_usd;
+    // Используем цену в USD
+    const priceUSD = event.price; 
+    const productId = event.product_id;
+    const store = event.store;
     const userId = event.app_user_id;
-    const product = event.product_id;
+
+    const storeIcon = store === 'PLAY_STORE' ? '🤖 Google Play' : '🍏 App Store';
+
+    let message = '';
 
     switch (type) {
       case 'INITIAL_PURCHASE':
-        message = `💰 **Новая продажа!**\nПользователь: \`${userId}\`\nПродукт: \`${product}\`\nСумма: $${price}`;
+        message = `💰 **НОВАЯ ПРОДАЖА!**\n\n` +
+                  `💵 **Сумма:** $${priceUSD}\n` +
+                  `📦 **Товар:** \`${productId}\`\n` +
+                  `🏪 **Магазин:** ${storeIcon}\n` +
+                  `👤 **ID:** \`${userId}\``;
         break;
       case 'RENEWAL':
-        message = `🔄 **Продление подписки**\nПользователь: \`${userId}\`\nСумма: $${price}`;
+        message = `🔄 **Продление подписки**\n` +
+                  `💵 **Сумма:** $${priceUSD}\n` +
+                  `👤 **User:** \`${userId}\``;
         break;
       case 'CANCELLATION':
-        message = `❌ **Отмена подписки**\nПользователь: \`${userId}\`\nПричина: ${event.cancel_reason || 'не указана'}`;
+        message = `❌ **Отмена подписки**\n` +
+                  `👤 **User:** \`${userId}\`\n` +
+                  `📝 **Причина:** ${event.cancel_reason || 'не указана'}`;
         break;
       default:
-        // Можно игнорировать другие типы событий или слать общее уведомление
-        message = `ℹ️ **Событие RevenueCat: ${type}**\nUser: \`${userId}\``;
-        break;
+        message = `ℹ️ **Событие:** ${type}\n` +
+                  `👤 **User:** \`${userId}\``;
     }
 
-    // 3. Отправка в Telegram
-    const tgUrl = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-    
-    await fetch(tgUrl, {
+    // Отправка в Telegram
+    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -47,9 +55,9 @@ export async function POST(request: NextRequest) {
       }),
     });
 
-    return NextResponse.json({ received: true }, { status: 200 });
+    return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error('RevenueCat Webhook Error:', error);
+    console.error('Webhook Error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
