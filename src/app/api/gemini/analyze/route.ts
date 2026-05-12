@@ -6,7 +6,8 @@ type AnalyzeInput =
   | { kind: 'text'; text: string };
 
 interface AnalyzeRequestBody {
-  model: string;
+  model?: string;
+  tier?: string;
   prompt?: string;
   input: AnalyzeInput;
 }
@@ -36,6 +37,19 @@ const buildPrompt = (input: AnalyzeInput, customPrompt?: string): string => {
   return customPrompt ?? 'Analyze the food on the image and return JSON nutrition per 100g.';
 };
 
+const resolveModel = (tier?: string, model?: string): string => {
+  if (
+    tier === 'premium' ||
+    model === 'gemini-3.1-flash-lite-preview' ||
+    model === 'gemini-3.1-flash-lite'
+  ) {
+    return 'gemini-3.1-flash-lite';
+  }
+  
+  // Фолбэк на базовую модель для free, старых версий или непредвиденных значений
+  return 'gemini-2.5-flash-lite';
+};
+
 export async function POST(req: Request) {
   const headers = cors(req.headers.get('origin') ?? '');
   const apiKey = process.env.GEMINI_API_KEY;
@@ -56,7 +70,7 @@ export async function POST(req: Request) {
   }
 
   const body = (await req.json()) as AnalyzeRequestBody;
-  const model = body.model || 'gemini-2.5-flash-lite';
+  const model = resolveModel(body.tier, body.model);
 
   const parts: Array<Record<string, unknown>> = [{ text: buildPrompt(body.input, body.prompt) }];
 
