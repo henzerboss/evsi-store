@@ -12,6 +12,23 @@ interface AnalyzeRequestBody {
   input: AnalyzeInput;
 }
 
+// --- НАЧАЛО БЛОКА RATE LIMIT ---
+// Хранилище в оперативной памяти сервера
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const LIMIT = 100; // 100 запросов
+const WINDOW_MS = 60 * 60 * 1000; // 1 час в миллисекундах
+
+// Фоновая очистка старых записей каждые 10 минут, чтобы не утекала память
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, data] of rateLimitMap.entries()) {
+    if (now > data.resetTime) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}, 10 * 60 * 1000);
+// --- КОНЕЦ БЛОКА RATE LIMIT ---
+
 function cors(origin: string) {
   return {
     'Access-Control-Allow-Origin': origin || '*',
@@ -45,13 +62,40 @@ const resolveModel = (tier?: string, model?: string): string => {
   ) {
     return 'gemini-3.1-flash-lite';
   }
-  
-  // Фолбэк на базовую модель для free, старых версий или непредвиденных значений
   return 'gemini-2.5-flash-lite';
 };
 
 export async function POST(req: Request) {
   const headers = cors(req.headers.get('origin') ?? '');
+  
+  // --- ПРОВЕРКА RATE LIMIT ---
+  // Получаем IP-адрес. На Vercel и большинстве прокси IP лежит в заголовке x-forwarded-for
+  const ip = req.headers.get('x-forwarded-for') || 'unknown-ip';
+
+  if (ip !== 'unknown-ip') {
+    const now = Date.now();
+    const record = rateLimitMap.get(ip);
+
+    if (!record || now > record.resetTime) {
+      // Это первый запрос с этого IP, или прошел час с момента блокировки
+      rateLimitMap.set(ip, { count: 1, resetTime: now + WINDOW_MS });
+    } else if (record.count < LIMIT) {
+      // Лимит еще не исчерпан
+      record.count++;
+    } else {
+      // ЛИМИТ ПРЕВЫШЕН
+      return new Response(JSON.stringify({ error: 'Too Many Requests', limit: LIMIT }), {
+        status: 429,
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+          'Retry-After': String(Math.ceil((record.resetTime - now) / 1000)), // Подсказываем клиенту, через сколько секунд повторить
+        },
+      });
+    }
+  }
+  // --- КОНЕЦ ПРОВЕРКИ ---
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'GEMINI_API_KEY missing' }), {
