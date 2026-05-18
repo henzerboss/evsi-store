@@ -59,6 +59,7 @@ const buildPrompt = (input: AnalyzeInput, customPrompt?: string): string => {
   return customPrompt ?? 'Analyze the food on the image and return JSON nutrition per 100g.';
 };
 
+// Оставляем функцию для совместимости, но фактический порядок моделей задан ниже.
 const resolveModel = (tier?: string, model?: string): string => {
   if (
     tier === 'premium' ||
@@ -77,31 +78,18 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
+const MAX_ATTEMPTS_PER_MODEL = 2;
+const DELAY_BETWEEN_ATTEMPTS_MS = 1000;
+
 const fallbackModels = (primaryModel: string): string[] => {
   const models = [
     primaryModel,
-
-    // Fallback при 503/перегрузке основной модели.
-    // Формат ответа тот же, приложение обновлять не нужно.
+    'gemini-2.5-flash-lite',
     'gemini-2.5-flash',
+    'gemini-3.1-flash-lite',
   ];
 
   return [...new Set(models)];
-};
-
-const getBackoffMs = (response: Response, attempt: number): number => {
-  const retryAfter = response.headers.get('retry-after');
-
-  if (retryAfter) {
-    const retryAfterSeconds = Number(retryAfter);
-
-    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
-      return retryAfterSeconds * 1000;
-    }
-  }
-
-  // 1 сек, потом 2 сек
-  return 1000 * Math.pow(2, attempt);
 };
 
 const callGeminiWithFallback = async (
@@ -117,10 +105,13 @@ const callGeminiWithFallback = async (
 
   let lastResponse: Response | null = null;
   let lastText = '';
+  let lastModel = models[0];
 
-  for (const model of models) {
-    // 1 первичный запрос + 2 retry на каждую модель
-    for (let attempt = 0; attempt < 3; attempt++) {
+  for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
+    const model = models[modelIndex];
+    lastModel = model;
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL; attempt++) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
       let response: Response;
@@ -138,11 +129,16 @@ const callGeminiWithFallback = async (
         lastResponse = new Response(null, { status: 503 });
         lastText = JSON.stringify({
           error: 'Gemini fetch failed',
+          model,
+          attempt: attempt + 1,
           details: error instanceof Error ? error.message : String(error),
         });
 
-        if (attempt < 2) {
-          await sleep(1000 * Math.pow(2, attempt));
+        const hasNextAttempt = attempt < MAX_ATTEMPTS_PER_MODEL - 1;
+        const hasNextModel = modelIndex < models.length - 1;
+
+        if (hasNextAttempt || hasNextModel) {
+          await sleep(DELAY_BETWEEN_ATTEMPTS_MS);
           continue;
         }
 
@@ -156,21 +152,33 @@ const callGeminiWithFallback = async (
       lastResponse = response;
       lastText = text;
 
-      // Не ретраим 400/401/403 и другие ошибки, которые не связаны с временной недоступностью
-      if (!RETRYABLE_STATUSES.has(response.status)) {
+      const isModelUnavailable = response.status === 400 || response.status === 404;
+
+      const shouldTryNext =
+        RETRYABLE_STATUSES.has(response.status) || isModelUnavailable;
+
+      if (!shouldTryNext) {
         return { response, text, model };
       }
 
-      if (attempt < 2) {
-        await sleep(getBackoffMs(response, attempt));
+      const hasNextAttempt = attempt < MAX_ATTEMPTS_PER_MODEL - 1;
+      const hasNextModel = modelIndex < models.length - 1;
+
+      if (hasNextAttempt || hasNextModel) {
+        await sleep(DELAY_BETWEEN_ATTEMPTS_MS);
       }
     }
   }
 
   return {
     response: lastResponse ?? new Response(null, { status: 503 }),
-    text: lastText || JSON.stringify({ error: 'Gemini unavailable after fallback attempts' }),
-    model: primaryModel,
+    text:
+      lastText ||
+      JSON.stringify({
+        error: 'Gemini unavailable after fallback attempts',
+        models,
+      }),
+    model: lastModel,
   };
 };
 
@@ -276,7 +284,7 @@ export async function POST(req: Request) {
       ...headers,
       'Content-Type': 'application/json',
 
-      // Можно смотреть в логах/Network, какая модель реально ответила
+      // Можно смотреть в Network/логах, какая модель реально ответила
       'X-Gemini-Model-Used': result.model,
     },
   });
