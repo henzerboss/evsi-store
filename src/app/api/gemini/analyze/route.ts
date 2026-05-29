@@ -61,8 +61,12 @@ const buildPrompt = (input: AnalyzeInput, customPrompt?: string): string => {
 
 // Оставляем функцию для совместимости, но фактический порядок моделей задан ниже.
 const resolveModel = (tier?: string, model?: string): string => {
-  if (tier === 'premium') {
-    return 'gemini-2.5-flash';
+  if (
+    tier === 'premium' ||
+    model === 'gemini-3.1-flash-lite-preview' ||
+    model === 'gemini-3.1-flash-lite'
+  ) {
+    return 'gemini-2.5-flash-lite';
   }
 
   return 'gemini-2.5-flash-lite';
@@ -77,28 +81,19 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS_PER_MODEL = 2;
 const DELAY_BETWEEN_ATTEMPTS_MS = 1000;
 
-const fallbackModels = (tier: string | undefined, primaryModel: string): string[] => {
-  const models =
-    tier === 'premium'
-      ? [
-          primaryModel,
-          'gemini-2.5-flash',
-          'gemini-2.5-flash-lite',
-          'gemini-3.1-flash-lite',
-        ]
-      : [
-          primaryModel,
-          'gemini-2.5-flash-lite',
-          'gemini-2.5-flash',
-          'gemini-3.1-flash-lite',
-        ];
+const fallbackModels = (primaryModel: string): string[] => {
+  const models = [
+    primaryModel,
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-3.1-flash-lite',
+  ];
 
   return [...new Set(models)];
 };
 
 const callGeminiWithFallback = async (
   apiKey: string,
-  tier: string | undefined,
   primaryModel: string,
   payload: unknown
 ): Promise<{
@@ -106,7 +101,7 @@ const callGeminiWithFallback = async (
   text: string;
   model: string;
 }> => {
-  const models = fallbackModels(tier, primaryModel);
+  const models = fallbackModels(primaryModel);
 
   let lastResponse: Response | null = null;
   let lastText = '';
@@ -281,7 +276,7 @@ export async function POST(req: Request) {
     },
   };
 
-const result = await callGeminiWithFallback(apiKey, body.tier, model, payload);
+  const result = await callGeminiWithFallback(apiKey, model, payload);
 
   return new Response(result.text, {
     status: result.response.status,
