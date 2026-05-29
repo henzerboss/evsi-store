@@ -59,14 +59,12 @@ const buildPrompt = (input: AnalyzeInput, customPrompt?: string): string => {
   return customPrompt ?? 'Analyze the food on the image and return JSON nutrition per 100g.';
 };
 
-// Оставляем функцию для совместимости, но фактический порядок моделей задан ниже.
-const resolveModel = (tier?: string, model?: string): string => {
-  if (
-    tier === 'premium' ||
-    model === 'gemini-3.1-flash-lite-preview' ||
-    model === 'gemini-3.1-flash-lite'
-  ) {
-    return 'gemini-2.5-flash-lite';
+// Primary-модель в зависимости от tier:
+//   premium -> gemini-2.5-flash (лучшее качество)
+//   остальные (free / прочее) -> gemini-2.5-flash-lite (баланс цена/качество)
+const resolveModel = (tier?: string): string => {
+  if (tier === 'premium') {
+    return 'gemini-2.5-flash';
   }
 
   return 'gemini-2.5-flash-lite';
@@ -81,19 +79,34 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS_PER_MODEL = 2;
 const DELAY_BETWEEN_ATTEMPTS_MS = 1000;
 
-const fallbackModels = (primaryModel: string): string[] => {
-  const models = [
-    primaryModel,
-    'gemini-2.5-flash-lite',
-    'gemini-2.5-flash',
-    'gemini-3.1-flash-lite',
-  ];
+// Порядок fallback зависит от tier.
+//   premium:        flash -> flash-lite -> 3.1-flash-lite
+//   free / прочее:  flash-lite -> flash -> 3.1-flash-lite
+const fallbackModels = (
+  tier: string | undefined,
+  primaryModel: string
+): string[] => {
+  const models =
+    tier === 'premium'
+      ? [
+          primaryModel,
+          'gemini-2.5-flash',
+          'gemini-2.5-flash-lite',
+          'gemini-3.1-flash-lite',
+        ]
+      : [
+          primaryModel,
+          'gemini-2.5-flash-lite',
+          'gemini-2.5-flash',
+          'gemini-3.1-flash-lite',
+        ];
 
   return [...new Set(models)];
 };
 
 const callGeminiWithFallback = async (
   apiKey: string,
+  tier: string | undefined,
   primaryModel: string,
   payload: unknown
 ): Promise<{
@@ -101,7 +114,7 @@ const callGeminiWithFallback = async (
   text: string;
   model: string;
 }> => {
-  const models = fallbackModels(primaryModel);
+  const models = fallbackModels(tier, primaryModel);
 
   let lastResponse: Response | null = null;
   let lastText = '';
@@ -250,7 +263,7 @@ export async function POST(req: Request) {
     });
   }
 
-  const model = resolveModel(body.tier, body.model);
+  const model = resolveModel(body.tier);
 
   const parts: Array<Record<string, unknown>> = [
     {
@@ -271,12 +284,17 @@ export async function POST(req: Request) {
     contents: [{ parts }],
     generationConfig: {
       responseMimeType: 'application/json',
-      maxOutputTokens: 256,
+      maxOutputTokens: 1024,
       temperature: 0.4,
+      // Отключаем "рассуждения": на составных блюдах thinking схлопывал
+      // тарелку до одного компонента и стоил вдвое больше токенов.
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
     },
   };
 
-  const result = await callGeminiWithFallback(apiKey, model, payload);
+  const result = await callGeminiWithFallback(apiKey, body.tier, model, payload);
 
   return new Response(result.text, {
     status: result.response.status,
