@@ -142,3 +142,118 @@ model TgUserProfile {
 
   updatedAt DateTime @updatedAt
 }
+// --- CHESS PRO WORLD CHAMPIONSHIP ---
+
+model ChessPlayer {
+  id          String   @id @default(cuid())
+  publicId    String   @unique
+  nickname    String
+  countryCode String
+  countryName String
+  countryFlag String
+  isActive    Boolean  @default(true)
+  joinedAt    DateTime @default(now())
+  leftAt      DateTime?
+  totalWins   Int      @default(0)
+  lastWinAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  categoryStats       ChessPlayerCategoryStat[]
+  periodCategoryStats ChessPlayerPeriodCategoryStat[]
+  winEvents           ChessWinEvent[]
+
+  @@index([countryCode])
+  @@index([isActive, totalWins])
+}
+
+model ChessPlayerCategoryStat {
+  id            String   @id @default(cuid())
+  playerId      String
+  categoryKey   String
+  timeControlId String
+  difficulty    String
+  wins          Int      @default(0)
+  bestTimeSec   Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  player ChessPlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, categoryKey])
+  @@index([categoryKey, wins, updatedAt])
+}
+
+model ChessCountryCategoryStat {
+  id            String   @id @default(cuid())
+  countryCode   String
+  countryName   String
+  countryFlag   String
+  categoryKey   String
+  timeControlId String
+  difficulty    String
+  wins          Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([countryCode, categoryKey])
+  @@index([categoryKey, wins, updatedAt])
+}
+
+model ChessPlayerPeriodCategoryStat {
+  id            String   @id @default(cuid())
+  playerId      String
+  periodType    String
+  periodKey     String
+  categoryKey   String
+  timeControlId String
+  difficulty    String
+  wins          Int      @default(0)
+  bestTimeSec   Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  player ChessPlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, periodType, periodKey, categoryKey])
+  @@index([periodType, periodKey, categoryKey, wins, updatedAt])
+  @@index([playerId, periodType, periodKey])
+}
+
+model ChessCountryPeriodCategoryStat {
+  id            String   @id @default(cuid())
+  countryCode   String
+  countryName   String
+  countryFlag   String
+  periodType    String
+  periodKey     String
+  categoryKey   String
+  timeControlId String
+  difficulty    String
+  wins          Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([countryCode, periodType, periodKey, categoryKey])
+  @@index([periodType, periodKey, categoryKey, wins, updatedAt])
+  @@index([countryCode, periodType, periodKey])
+}
+
+model ChessWinEvent {
+  id            String   @id @default(cuid())
+  eventId       String   @unique
+  playerId      String
+  countryCode   String
+  categoryKey   String
+  timeControlId String
+  difficulty    String
+  elapsedSec    Int?
+  occurredAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  player ChessPlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([playerId, createdAt])
+  @@index([categoryKey, createdAt])
+  @@index([countryCode, categoryKey])
+}
