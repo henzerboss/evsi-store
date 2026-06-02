@@ -41,7 +41,7 @@ type RankingRow = {
 };
 
 type ActivityRow = {
-  day: string;
+  day: string | null;
   wins: CountLike;
 };
 
@@ -238,6 +238,18 @@ function formatDate(value: Date | string | null | undefined) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function safeText(value: string | number | bigint | null | undefined, fallback = "—") {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+function formatActivityDay(value: string | null | undefined) {
+  const day = safeText(value);
+  if (day === "—") return day;
+  return day.length > 5 ? day.slice(5) : day;
 }
 
 function formatElapsed(value: CountLike) {
@@ -538,7 +550,7 @@ const getDashboardData = unstable_cache(
       ready: true as const,
       generatedAt: new Date().toISOString(),
       kpis,
-      activityRows: activityRows.map((row) => ({ ...row, wins: toNumber(row.wins) })),
+      activityRows: activityRows.map((row) => ({ day: row.day ? String(row.day) : null, wins: toNumber(row.wins) })),
       recentWins: recentWins.map((row) => ({
         ...row,
         createdAt: row.createdAt ? String(row.createdAt) : null,
@@ -1124,13 +1136,14 @@ export default async function ChessAdminPage({
                   {data.activityRows.length === 0 ? (
                     <div className="flex h-full w-full items-center justify-center rounded-xl bg-gray-50 text-gray-400">Нет событий за период</div>
                   ) : (
-                    data.activityRows.map((row) => {
+                    data.activityRows.map((row, index) => {
                       const max = Math.max(...data.activityRows.map((item) => toNumber(item.wins)), 1);
                       const height = Math.max(8, Math.round((toNumber(row.wins) / max) * 160));
+                      const dayText = safeText(row.day);
                       return (
-                        <div key={row.day} className="flex flex-1 flex-col items-center gap-2">
-                          <div className="w-full rounded-t-xl bg-black/80" style={{ height }} title={`${row.day}: ${formatNumber(row.wins)}`} />
-                          <div className="text-[10px] text-gray-400">{row.day.slice(5)}</div>
+                        <div key={`${dayText}-${index}`} className="flex flex-1 flex-col items-center gap-2">
+                          <div className="w-full rounded-t-xl bg-black/80" style={{ height }} title={`${dayText}: ${formatNumber(row.wins)}`} />
+                          <div className="text-[10px] text-gray-400">{formatActivityDay(row.day)}</div>
                         </div>
                       );
                     })
