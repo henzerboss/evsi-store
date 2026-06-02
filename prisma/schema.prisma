@@ -162,6 +162,7 @@ model ChessPlayer {
   categoryStats       ChessPlayerCategoryStat[]
   periodCategoryStats ChessPlayerPeriodCategoryStat[]
   winEvents           ChessWinEvent[]
+  podiumAwards        ChessChampionshipPodiumAward[]
 
   @@index([countryCode])
   @@index([isActive, totalWins])
@@ -256,4 +257,44 @@ model ChessWinEvent {
   @@index([playerId, createdAt])
   @@index([categoryKey, createdAt])
   @@index([countryCode, categoryKey])
+}
+
+
+model ChessChampionshipPodiumAward {
+  id             String   @id @default(cuid())
+  awardType      String
+  periodType     String
+  periodKey      String
+  categoryKey    String
+  timeControlId  String
+  difficulty     String
+  place          Int
+  wins           Int
+  playerId       String?
+  playerPublicId String?
+  nickname       String?
+  countryCode    String
+  countryName    String
+  countryFlag    String
+  finalizedAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  player ChessPlayer? @relation(fields: [playerId], references: [id], onDelete: SetNull)
+
+  @@unique([awardType, periodType, periodKey, categoryKey, place])
+  @@index([playerId, awardType, periodType, periodKey])
+  @@index([countryCode, awardType, periodType, periodKey])
+  @@index([periodType, periodKey, categoryKey, awardType])
+}
+
+model ChessChampionshipPodiumFinalization {
+  id          String   @id @default(cuid())
+  periodType  String
+  periodKey   String
+  categoryKey String
+  finalizedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@unique([periodType, periodKey, categoryKey])
+  @@index([periodType, periodKey])
 }

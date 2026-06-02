@@ -128,6 +128,8 @@ type Bucket = { count: number; resetAt: number };
 declare global {
   // eslint-disable-next-line no-var
   var chessChampionshipBuckets: Map<string, Bucket> | undefined;
+  // eslint-disable-next-line no-var
+  var chessChampionshipLastPodiumFinalizeAt: number | undefined;
 }
 
 const buckets = globalThis.chessChampionshipBuckets ?? new Map<string, Bucket>();
@@ -270,6 +272,249 @@ function periodBounds(periodType: PeriodType, periodKey: string) {
   return {
     startsAt: new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0)).toISOString(),
     endsAt: new Date(Date.UTC(year, monthIndex + 1, 1, 0, 0, 0)).toISOString(),
+  };
+}
+
+
+async function finalizeCategoryPodiums(period: PeriodDescriptor, category: string) {
+  const [timeControlId, difficulty] = category.split('__');
+  if (!timeControlId || !difficulty) return;
+
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.chessChampionshipPodiumFinalization.findUnique({
+      where: {
+        periodType_periodKey_categoryKey: {
+          periodType: period.periodType,
+          periodKey: period.periodKey,
+          categoryKey: category,
+        },
+      },
+    });
+    if (existing) return;
+
+    const players = await tx.chessPlayerPeriodCategoryStat.findMany({
+      where: {
+        periodType: period.periodType,
+        periodKey: period.periodKey,
+        categoryKey: category,
+        wins: { gt: 0 },
+        player: { isActive: true },
+      },
+      orderBy: [{ wins: 'desc' }, { updatedAt: 'asc' }],
+      take: 3,
+      include: { player: true },
+    });
+
+    const countries = await tx.chessCountryPeriodCategoryStat.findMany({
+      where: {
+        periodType: period.periodType,
+        periodKey: period.periodKey,
+        categoryKey: category,
+        wins: { gt: 0 },
+      },
+      orderBy: [{ wins: 'desc' }, { updatedAt: 'asc' }],
+      take: 3,
+    });
+
+    for (const [index, row] of players.entries()) {
+      const place = index + 1;
+      await tx.chessChampionshipPodiumAward.upsert({
+        where: {
+          awardType_periodType_periodKey_categoryKey_place: {
+            awardType: 'player',
+            periodType: period.periodType,
+            periodKey: period.periodKey,
+            categoryKey: category,
+            place,
+          },
+        },
+        create: {
+          awardType: 'player',
+          periodType: period.periodType,
+          periodKey: period.periodKey,
+          categoryKey: category,
+          timeControlId,
+          difficulty,
+          place,
+          wins: row.wins,
+          playerId: row.playerId,
+          playerPublicId: row.player.publicId,
+          nickname: row.player.nickname,
+          countryCode: row.player.countryCode,
+          countryName: row.player.countryName,
+          countryFlag: row.player.countryFlag,
+          finalizedAt: new Date(),
+        },
+        update: {},
+      });
+    }
+
+    for (const [index, row] of countries.entries()) {
+      const place = index + 1;
+      await tx.chessChampionshipPodiumAward.upsert({
+        where: {
+          awardType_periodType_periodKey_categoryKey_place: {
+            awardType: 'country',
+            periodType: period.periodType,
+            periodKey: period.periodKey,
+            categoryKey: category,
+            place,
+          },
+        },
+        create: {
+          awardType: 'country',
+          periodType: period.periodType,
+          periodKey: period.periodKey,
+          categoryKey: category,
+          timeControlId,
+          difficulty,
+          place,
+          wins: row.wins,
+          countryCode: row.countryCode,
+          countryName: row.countryName,
+          countryFlag: row.countryFlag,
+          finalizedAt: new Date(),
+        },
+        update: {},
+      });
+    }
+
+    await tx.chessChampionshipPodiumFinalization
+      .create({
+        data: {
+          periodType: period.periodType,
+          periodKey: period.periodKey,
+          categoryKey: category,
+          finalizedAt: new Date(),
+        },
+      })
+      .catch((error) => {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          return null;
+        }
+        throw error;
+      });
+  });
+}
+
+async function finalizeCompletedPodiums() {
+  const now = Date.now();
+  const lastRun = globalThis.chessChampionshipLastPodiumFinalizeAt || 0;
+  if (now - lastRun < 10 * 60_000) return;
+  globalThis.chessChampionshipLastPodiumFinalizeAt = now;
+
+  const nowDate = new Date(now);
+  const currentMonthlyKey = periodFromDate(nowDate, 'monthly').periodKey;
+  const currentYearlyKey = periodFromDate(nowDate, 'yearly').periodKey;
+
+  const candidates = await prisma.chessPlayerPeriodCategoryStat.findMany({
+    where: {
+      OR: [
+        { periodType: 'monthly', periodKey: { lt: currentMonthlyKey } },
+        { periodType: 'yearly', periodKey: { lt: currentYearlyKey } },
+      ],
+    },
+    select: { periodType: true, periodKey: true, categoryKey: true },
+    distinct: ['periodType', 'periodKey', 'categoryKey'],
+    orderBy: [{ periodKey: 'desc' }],
+    take: 240,
+  });
+
+  for (const candidate of candidates) {
+    if (candidate.periodType !== 'monthly' && candidate.periodType !== 'yearly') continue;
+    await finalizeCategoryPodiums(
+      {
+        periodType: candidate.periodType,
+        periodKey: candidate.periodKey,
+      },
+      candidate.categoryKey,
+    );
+  }
+}
+
+function trophySummary(rows: Array<{ place: number }>) {
+  const gold = rows.filter((row) => row.place === 1).length;
+  const silver = rows.filter((row) => row.place === 2).length;
+  const bronze = rows.filter((row) => row.place === 3).length;
+  return { gold, silver, bronze, total: gold + silver + bronze };
+}
+
+function mapPodiumAward(row: {
+  id: string;
+  awardType: string;
+  periodType: string;
+  periodKey: string;
+  categoryKey: string;
+  timeControlId: string;
+  difficulty: string;
+  place: number;
+  wins: number;
+  playerPublicId: string | null;
+  nickname: string | null;
+  countryCode: string;
+  countryName: string;
+  countryFlag: string;
+  createdAt: Date;
+}) {
+  return {
+    id: row.id,
+    awardType: row.awardType,
+    periodType: row.periodType,
+    periodKey: row.periodKey,
+    category: row.categoryKey,
+    timeControlId: row.timeControlId,
+    difficulty: row.difficulty,
+    place: row.place,
+    wins: row.wins,
+    playerId: row.playerPublicId,
+    nickname: row.nickname,
+    countryCode: row.countryCode,
+    countryName: row.countryName,
+    countryFlag: row.countryFlag,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+async function podiumsPayload(player: Awaited<ReturnType<typeof getPlayerByPublicId>>) {
+  await finalizeCompletedPodiums().catch((error) => {
+    console.error('podium finalization failed', error);
+  });
+
+  if (!player) {
+    return {
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      playerAwards: [],
+      countryAwards: [],
+      summary: {
+        player: { gold: 0, silver: 0, bronze: 0, total: 0 },
+        country: { gold: 0, silver: 0, bronze: 0, total: 0 },
+      },
+    };
+  }
+
+  const [playerAwards, countryAwards] = await Promise.all([
+    prisma.chessChampionshipPodiumAward.findMany({
+      where: { awardType: 'player', playerId: player.id },
+      orderBy: [{ periodKey: 'desc' }, { createdAt: 'desc' }, { place: 'asc' }],
+      take: 200,
+    }),
+    prisma.chessChampionshipPodiumAward.findMany({
+      where: { awardType: 'country', countryCode: player.countryCode },
+      orderBy: [{ periodKey: 'desc' }, { createdAt: 'desc' }, { place: 'asc' }],
+      take: 200,
+    }),
+  ]);
+
+  return {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    playerAwards: playerAwards.map(mapPodiumAward),
+    countryAwards: countryAwards.map(mapPodiumAward),
+    summary: {
+      player: trophySummary(playerAwards),
+      country: trophySummary(countryAwards),
+    },
   };
 }
 
@@ -458,6 +703,16 @@ export async function GET(req: NextRequest) {
       429,
       { 'Retry-After': String(rate.retryAfterSec) },
     );
+  }
+
+  const view = req.nextUrl.searchParams.get('view');
+  if (view === 'podiums') {
+    const player = await getPlayerByPublicId(req.nextUrl.searchParams.get('playerId'));
+    const payload = await podiumsPayload(player);
+    return json(payload, 200, {
+      'Cache-Control': player ? 'private, max-age=60' : 'public, s-maxage=60, stale-while-revalidate=300',
+      'Access-Control-Allow-Origin': '*',
+    });
   }
 
   const category = req.nextUrl.searchParams.get('category') || 'classic_60__beginner';
