@@ -123,6 +123,27 @@ const RATE_LIMITS = {
   recordWinBurst: { max: 1, windowMs: 8_000 },
 } as const;
 
+const PODIUM_RULES = {
+  playerMinCompetitors: 3,
+  countryMinCompetitors: 3,
+  playerMinMonthlyWins: 3,
+  playerMinYearlyWins: 10,
+  countryMinMonthlyWins: 10,
+  countryMinYearlyWins: 50,
+  rankPlayerMinCompetitors: 10,
+  rankCountryMinCompetitors: 10,
+  rankPlayerLimit: 1000,
+  rankCountryLimit: 100,
+} as const;
+
+function minPlayerWinsForPeriod(periodType: PeriodType) {
+  return periodType === 'yearly' ? PODIUM_RULES.playerMinYearlyWins : PODIUM_RULES.playerMinMonthlyWins;
+}
+
+function minCountryWinsForPeriod(periodType: PeriodType) {
+  return periodType === 'yearly' ? PODIUM_RULES.countryMinYearlyWins : PODIUM_RULES.countryMinMonthlyWins;
+}
+
 type Bucket = { count: number; resetAt: number };
 
 declare global {
@@ -280,6 +301,9 @@ async function finalizeCategoryPodiums(period: PeriodDescriptor, category: strin
   const [timeControlId, difficulty] = category.split('__');
   if (!timeControlId || !difficulty) return;
 
+  const minPlayerWins = minPlayerWinsForPeriod(period.periodType);
+  const minCountryWins = minCountryWinsForPeriod(period.periodType);
+
   await prisma.$transaction(async (tx) => {
     const existing = await tx.chessChampionshipPodiumFinalization.findUnique({
       where: {
@@ -292,29 +316,44 @@ async function finalizeCategoryPodiums(period: PeriodDescriptor, category: strin
     });
     if (existing) return;
 
-    const players = await tx.chessPlayerPeriodCategoryStat.findMany({
-      where: {
-        periodType: period.periodType,
-        periodKey: period.periodKey,
-        categoryKey: category,
-        wins: { gt: 0 },
-        player: { isActive: true },
-      },
-      orderBy: [{ wins: 'desc' }, { updatedAt: 'asc' }],
-      take: 3,
-      include: { player: true },
-    });
+    const playerWhere = {
+      periodType: period.periodType,
+      periodKey: period.periodKey,
+      categoryKey: category,
+      wins: { gte: minPlayerWins },
+      player: { isActive: true },
+    } as const;
 
-    const countries = await tx.chessCountryPeriodCategoryStat.findMany({
-      where: {
-        periodType: period.periodType,
-        periodKey: period.periodKey,
-        categoryKey: category,
-        wins: { gt: 0 },
-      },
-      orderBy: [{ wins: 'desc' }, { updatedAt: 'asc' }],
-      take: 3,
-    });
+    const countryWhere = {
+      periodType: period.periodType,
+      periodKey: period.periodKey,
+      categoryKey: category,
+      wins: { gte: minCountryWins },
+    } as const;
+
+    const [playerParticipantCount, countryParticipantCount] = await Promise.all([
+      tx.chessPlayerPeriodCategoryStat.count({ where: playerWhere }),
+      tx.chessCountryPeriodCategoryStat.count({ where: countryWhere }),
+    ]);
+
+    const players =
+      playerParticipantCount >= PODIUM_RULES.playerMinCompetitors
+        ? await tx.chessPlayerPeriodCategoryStat.findMany({
+            where: playerWhere,
+            orderBy: [{ wins: 'desc' }, { updatedAt: 'asc' }],
+            take: 3,
+            include: { player: true },
+          })
+        : [];
+
+    const countries =
+      countryParticipantCount >= PODIUM_RULES.countryMinCompetitors
+        ? await tx.chessCountryPeriodCategoryStat.findMany({
+            where: countryWhere,
+            orderBy: [{ wins: 'desc' }, { updatedAt: 'asc' }],
+            take: 3,
+          })
+        : [];
 
     for (const [index, row] of players.entries()) {
       const place = index + 1;
@@ -379,6 +418,90 @@ async function finalizeCategoryPodiums(period: PeriodDescriptor, category: strin
       });
     }
 
+    if (playerParticipantCount >= PODIUM_RULES.rankPlayerMinCompetitors) {
+      const rankPlayers = await tx.chessPlayerPeriodCategoryStat.findMany({
+        where: playerWhere,
+        orderBy: [{ wins: 'desc' }, { updatedAt: 'asc' }],
+        take: PODIUM_RULES.rankPlayerLimit,
+        include: { player: true },
+      });
+
+      for (const [index, row] of rankPlayers.entries()) {
+        const rank = index + 1;
+        await tx.chessChampionshipRankAward.upsert({
+          where: {
+            awardType_periodType_periodKey_categoryKey_ownerKey: {
+              awardType: 'player',
+              periodType: period.periodType,
+              periodKey: period.periodKey,
+              categoryKey: category,
+              ownerKey: row.player.publicId,
+            },
+          },
+          create: {
+            awardType: 'player',
+            periodType: period.periodType,
+            periodKey: period.periodKey,
+            categoryKey: category,
+            timeControlId,
+            difficulty,
+            ownerKey: row.player.publicId,
+            rank,
+            wins: row.wins,
+            participantCount: playerParticipantCount,
+            playerId: row.playerId,
+            playerPublicId: row.player.publicId,
+            nickname: row.player.nickname,
+            countryCode: row.player.countryCode,
+            countryName: row.player.countryName,
+            countryFlag: row.player.countryFlag,
+            finalizedAt: new Date(),
+          },
+          update: {},
+        });
+      }
+    }
+
+    if (countryParticipantCount >= PODIUM_RULES.rankCountryMinCompetitors) {
+      const rankCountries = await tx.chessCountryPeriodCategoryStat.findMany({
+        where: countryWhere,
+        orderBy: [{ wins: 'desc' }, { updatedAt: 'asc' }],
+        take: PODIUM_RULES.rankCountryLimit,
+      });
+
+      for (const [index, row] of rankCountries.entries()) {
+        const rank = index + 1;
+        await tx.chessChampionshipRankAward.upsert({
+          where: {
+            awardType_periodType_periodKey_categoryKey_ownerKey: {
+              awardType: 'country',
+              periodType: period.periodType,
+              periodKey: period.periodKey,
+              categoryKey: category,
+              ownerKey: row.countryCode,
+            },
+          },
+          create: {
+            awardType: 'country',
+            periodType: period.periodType,
+            periodKey: period.periodKey,
+            categoryKey: category,
+            timeControlId,
+            difficulty,
+            ownerKey: row.countryCode,
+            rank,
+            wins: row.wins,
+            participantCount: countryParticipantCount,
+            countryCode: row.countryCode,
+            countryName: row.countryName,
+            countryFlag: row.countryFlag,
+            finalizedAt: new Date(),
+          },
+          update: {},
+        });
+      }
+    }
+
     await tx.chessChampionshipPodiumFinalization
       .create({
         data: {
@@ -439,6 +562,53 @@ function trophySummary(rows: Array<{ place: number }>) {
   return { gold, silver, bronze, total: gold + silver + bronze };
 }
 
+function emptyRankSummary() {
+  return {
+    player: { bestRank: null, participantCount: 0, periodType: null, periodKey: null, category: null },
+    country: { bestRank: null, participantCount: 0, periodType: null, periodKey: null, category: null },
+  };
+}
+
+function mapBestRank(row: {
+  rank: number;
+  participantCount: number;
+  periodType: string;
+  periodKey: string;
+  categoryKey: string;
+} | null | undefined) {
+  return row
+    ? {
+        bestRank: row.rank,
+        participantCount: row.participantCount,
+        periodType: row.periodType,
+        periodKey: row.periodKey,
+        category: row.categoryKey,
+      }
+    : { bestRank: null, participantCount: 0, periodType: null, periodKey: null, category: null };
+}
+
+async function rankSummaryForPlayer(player: Awaited<ReturnType<typeof getPlayerByPublicId>>) {
+  if (!player) return emptyRankSummary();
+
+  const [playerBestRank, countryBestRank] = await Promise.all([
+    prisma.chessChampionshipRankAward.findFirst({
+      where: { awardType: 'player', playerId: player.id },
+      orderBy: [{ rank: 'asc' }, { participantCount: 'desc' }, { wins: 'desc' }, { finalizedAt: 'desc' }],
+      select: { rank: true, participantCount: true, periodType: true, periodKey: true, categoryKey: true },
+    }),
+    prisma.chessChampionshipRankAward.findFirst({
+      where: { awardType: 'country', countryCode: player.countryCode },
+      orderBy: [{ rank: 'asc' }, { participantCount: 'desc' }, { wins: 'desc' }, { finalizedAt: 'desc' }],
+      select: { rank: true, participantCount: true, periodType: true, periodKey: true, categoryKey: true },
+    }),
+  ]);
+
+  return {
+    player: mapBestRank(playerBestRank),
+    country: mapBestRank(countryBestRank),
+  };
+}
+
 function mapPodiumAward(row: {
   id: string;
   awardType: string;
@@ -490,10 +660,11 @@ async function podiumsPayload(player: Awaited<ReturnType<typeof getPlayerByPubli
         player: { gold: 0, silver: 0, bronze: 0, total: 0 },
         country: { gold: 0, silver: 0, bronze: 0, total: 0 },
       },
+      rankSummary: emptyRankSummary(),
     };
   }
 
-  const [playerAwards, countryAwards] = await Promise.all([
+  const [playerAwards, countryAwards, rankSummary] = await Promise.all([
     prisma.chessChampionshipPodiumAward.findMany({
       where: { awardType: 'player', playerId: player.id },
       orderBy: [{ periodKey: 'desc' }, { createdAt: 'desc' }, { place: 'asc' }],
@@ -504,6 +675,7 @@ async function podiumsPayload(player: Awaited<ReturnType<typeof getPlayerByPubli
       orderBy: [{ periodKey: 'desc' }, { createdAt: 'desc' }, { place: 'asc' }],
       take: 200,
     }),
+    rankSummaryForPlayer(player),
   ]);
 
   return {
@@ -515,6 +687,7 @@ async function podiumsPayload(player: Awaited<ReturnType<typeof getPlayerByPubli
       player: trophySummary(playerAwards),
       country: trophySummary(countryAwards),
     },
+    rankSummary,
   };
 }
 

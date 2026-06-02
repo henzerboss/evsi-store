@@ -1,11 +1,14 @@
 import { auth } from "@/auth";
 import prisma from "@/lib/prisma";
 import { revalidateTag, unstable_cache } from "next/cache";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 type PeriodType = "all" | "monthly" | "yearly";
 
@@ -926,6 +929,32 @@ function PlayerManagement({
   );
 }
 
+
+function makeEmptyDashboardData() {
+  return {
+    ready: true as const,
+    generatedAt: new Date().toISOString(),
+    kpis: {
+      totalPlayers: 0,
+      activePlayers: 0,
+      allTimeWins: 0,
+      monthWins: 0,
+      yearWins: 0,
+      wins24h: 0,
+      wins7d: 0,
+      newPlayers7d: 0,
+      podiumAwards: 0,
+      finalizedCategories: 0,
+    },
+    activityRows: [],
+    recentWins: [],
+    podiumAwards: [],
+    categoryMetric: { wins: 0, rowsCount: 0, lastUpdatedAt: null },
+    players: [],
+    countries: [],
+  };
+}
+
 export default async function ChessAdminPage({
   params,
   searchParams,
@@ -933,6 +962,7 @@ export default async function ChessAdminPage({
   params: Promise<{ locale: string }>;
   searchParams?: Promise<SearchParams>;
 }) {
+  await headers();
   const session = await auth();
   if (!session) redirect("/login");
 
@@ -953,8 +983,25 @@ export default async function ChessAdminPage({
   if (playerSearch) returnToParams.set("playerSearch", playerSearch);
   const returnTo = `/${locale}/chess-admin?${returnToParams.toString()}`;
 
-  const data = await getDashboardData(periodType, periodKey, categoryKey);
-  const playerRows = data.ready ? await getPlayerAdminRows(playerSearch) : [];
+  let dashboardError: string | null = null;
+  let data: Awaited<ReturnType<typeof getDashboardData>> | ReturnType<typeof makeEmptyDashboardData> = makeEmptyDashboardData();
+  let playerRows: PlayerAdminRow[] = [];
+
+  try {
+    data = await getDashboardData(periodType, periodKey, categoryKey);
+  } catch (error) {
+    console.error("Chess admin dashboard failed", error);
+    dashboardError = error instanceof Error ? error.message : "Неизвестная ошибка дашборда.";
+  }
+
+  if (data.ready) {
+    try {
+      playerRows = await getPlayerAdminRows(playerSearch);
+    } catch (error) {
+      console.error("Chess admin player search failed", error);
+      dashboardError = error instanceof Error ? error.message : "Не удалось загрузить игроков.";
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#f6f2ea]">
@@ -981,6 +1028,13 @@ export default async function ChessAdminPage({
         </div>
 
         <NoticeBox notice={notice} type={noticeType} />
+        {dashboardError ? (
+          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900 shadow-sm">
+            <h2 className="font-black">Ошибка загрузки Chess Admin</h2>
+            <p className="mt-2 text-sm">Страница не падает целиком, но один из запросов к БД вернул ошибку.</p>
+            <code className="mt-3 block whitespace-pre-wrap rounded-xl bg-white/70 p-3 text-xs text-red-800">{dashboardError}</code>
+          </div>
+        ) : null}
 
         {!data.ready ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-900 shadow-sm">
