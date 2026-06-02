@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import prisma from "@/lib/prisma";
-import { unstable_cache } from "next/cache";
+import { revalidateTag, unstable_cache } from "next/cache";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -76,6 +76,22 @@ type CategoryMetricRow = {
   rowsCount: CountLike;
   lastUpdatedAt: Date | string | null;
 };
+type PlayerAdminRow = {
+  id: string;
+  publicId: string;
+  nickname: string;
+  countryCode: string;
+  countryName: string;
+  countryFlag: string;
+  isActive: number | boolean;
+  totalWins: CountLike;
+  lastWinAt: Date | string | null;
+  createdAt: Date | string | null;
+  updatedAt: Date | string | null;
+  winEvents: CountLike;
+  podiumAwards: CountLike;
+};
+
 
 const TIME_CONTROLS = [
   { id: "classic_60", group: "Классика", label: "60 мин" },
@@ -125,6 +141,52 @@ function currentYearKey(date = new Date()) {
 
 function normalizeScalar(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function normalizePlayerSearch(value: string | string[] | undefined) {
+  return (normalizeScalar(value) || "").normalize("NFKC").trim().slice(0, 64);
+}
+
+function sanitizeAdminNickname(value: FormDataEntryValue | null) {
+  const normalized = String(value || "")
+    .normalize("NFKC")
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e]/g, "")
+    .replace(/[<>&"'`]/g, "")
+    .replace(/[^\p{L}\p{N}_ .-]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 24);
+
+  if (normalized.length < 2) {
+    throw new Error("Ник должен содержать минимум 2 допустимых символа.");
+  }
+
+  return normalized;
+}
+
+function sanitizePublicId(value: FormDataEntryValue | null) {
+  const normalized = String(value || "").trim();
+  if (!/^[a-zA-Z0-9_-]{12,96}$/.test(normalized)) {
+    throw new Error("Некорректный publicId игрока.");
+  }
+  return normalized;
+}
+
+function getSafeReturnTo(value: FormDataEntryValue | null) {
+  const raw = String(value || "/ru/chess-admin");
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/ru/chess-admin";
+  return raw.slice(0, 500);
+}
+
+function withNotice(path: string, notice: string, noticeType: "ok" | "error" = "ok") {
+  const url = new URL(path, "https://evsi.local");
+  url.searchParams.set("adminNotice", notice.slice(0, 180));
+  url.searchParams.set("adminNoticeType", noticeType);
+  return `${url.pathname}${url.search}`;
+}
+
+function escapeSqlLike(value: string) {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }
 
 function normalizePeriodType(value: string | string[] | undefined): PeriodType {
@@ -208,6 +270,125 @@ function placeIcon(place: CountLike) {
     default:
       return "🏅";
   }
+}
+
+async function requireAdminSession() {
+  const session = await auth();
+  if (!session) redirect("/login");
+  return session;
+}
+
+async function renameChessPlayerAction(formData: FormData) {
+  "use server";
+
+  const returnTo = getSafeReturnTo(formData.get("returnTo"));
+  await requireAdminSession();
+
+  let redirectTo = returnTo;
+
+  try {
+    const publicId = sanitizePublicId(formData.get("publicId"));
+    const nickname = sanitizeAdminNickname(formData.get("nickname"));
+
+    const player = await prisma.chessPlayer.update({
+      where: { publicId },
+      data: { nickname },
+      select: { id: true, publicId: true },
+    });
+
+    await prisma.chessChampionshipPodiumAward.updateMany({
+      where: { playerId: player.id },
+      data: { nickname },
+    });
+
+    revalidateTag("chess-admin-dashboard");
+    redirectTo = withNotice(returnTo, `Игрок ${player.publicId} переименован.`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Не удалось переименовать игрока.";
+    redirectTo = withNotice(returnTo, message, "error");
+  }
+
+  redirect(redirectTo);
+}
+
+async function deleteChessPlayerAction(formData: FormData) {
+  "use server";
+
+  const returnTo = getSafeReturnTo(formData.get("returnTo"));
+  await requireAdminSession();
+
+  let redirectTo = returnTo;
+
+  try {
+    const publicId = sanitizePublicId(formData.get("publicId"));
+    const confirmValue = String(formData.get("confirmDelete") || "").trim();
+
+    if (confirmValue !== `DELETE ${publicId}`) {
+      throw new Error(`Для удаления введите: DELETE ${publicId}`);
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const player = await tx.chessPlayer.findUnique({
+        where: { publicId },
+        select: { id: true, publicId: true, countryCode: true },
+      });
+
+      if (!player) throw new Error("Игрок не найден.");
+
+      const [allTimeStats, periodStats] = await Promise.all([
+        tx.chessPlayerCategoryStat.findMany({
+          where: { playerId: player.id },
+          select: { categoryKey: true, wins: true },
+        }),
+        tx.chessPlayerPeriodCategoryStat.findMany({
+          where: { playerId: player.id },
+          select: { periodType: true, periodKey: true, categoryKey: true, wins: true },
+        }),
+      ]);
+
+      for (const stat of allTimeStats) {
+        if (stat.wins <= 0) continue;
+        await tx.$executeRaw`
+          UPDATE "ChessCountryCategoryStat"
+          SET
+            "wins" = CASE WHEN "wins" >= ${stat.wins} THEN "wins" - ${stat.wins} ELSE 0 END,
+            "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "countryCode" = ${player.countryCode}
+            AND "categoryKey" = ${stat.categoryKey}
+        `;
+      }
+
+      for (const stat of periodStats) {
+        if (stat.wins <= 0) continue;
+        await tx.$executeRaw`
+          UPDATE "ChessCountryPeriodCategoryStat"
+          SET
+            "wins" = CASE WHEN "wins" >= ${stat.wins} THEN "wins" - ${stat.wins} ELSE 0 END,
+            "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "countryCode" = ${player.countryCode}
+            AND "periodType" = ${stat.periodType}
+            AND "periodKey" = ${stat.periodKey}
+            AND "categoryKey" = ${stat.categoryKey}
+        `;
+      }
+
+      await tx.chessChampionshipPodiumAward.deleteMany({
+        where: { awardType: "player", playerId: player.id },
+      });
+
+      await tx.chessPlayer.delete({ where: { id: player.id } });
+
+      return { publicId: player.publicId };
+    });
+
+    revalidateTag("chess-admin-dashboard");
+    redirectTo = withNotice(returnTo, `Игрок ${result.publicId} удалён. Его личные победы вычтены из агрегатов страны.`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Не удалось удалить игрока.";
+    redirectTo = withNotice(returnTo, message, "error");
+  }
+
+  redirect(redirectTo);
 }
 
 async function hasChampionshipTables() {
@@ -381,8 +562,8 @@ const getDashboardData = unstable_cache(
       })),
     };
   },
-  ["chess-admin-dashboard-v1"],
-  { revalidate: 60 },
+  ["chess-admin-dashboard-v2"],
+  { revalidate: 60, tags: ["chess-admin-dashboard"] },
 );
 
 async function getCategoryMetricRows(periodType: PeriodType, periodKey: string, categoryKey: string) {
@@ -483,6 +664,67 @@ async function getTopCountries(periodType: PeriodType, periodKey: string, catego
   `;
 }
 
+async function getPlayerAdminRows(search: string): Promise<PlayerAdminRow[]> {
+  const clean = search.trim();
+
+  if (clean) {
+    const like = `${escapeSqlLike(clean)}%`;
+    return prisma.$queryRaw<PlayerAdminRow[]>`
+      SELECT
+        p."id" AS "id",
+        p."publicId" AS "publicId",
+        p."nickname" AS "nickname",
+        p."countryCode" AS "countryCode",
+        p."countryName" AS "countryName",
+        p."countryFlag" AS "countryFlag",
+        p."isActive" AS "isActive",
+        p."totalWins" AS "totalWins",
+        p."lastWinAt" AS "lastWinAt",
+        p."createdAt" AS "createdAt",
+        p."updatedAt" AS "updatedAt",
+        (SELECT COUNT(1) FROM "ChessWinEvent" e WHERE e."playerId" = p."id") AS "winEvents",
+        (SELECT COUNT(1) FROM "ChessChampionshipPodiumAward" a WHERE a."playerId" = p."id") AS "podiumAwards"
+      FROM "ChessPlayer" p
+      WHERE p."publicId" = ${clean}
+         OR p."nickname" LIKE ${like} ESCAPE '\\'
+      ORDER BY
+        CASE WHEN p."publicId" = ${clean} THEN 0 ELSE 1 END ASC,
+        p."updatedAt" DESC
+      LIMIT 30
+    `;
+  }
+
+  return prisma.$queryRaw<PlayerAdminRow[]>`
+    SELECT
+      p."id" AS "id",
+      p."publicId" AS "publicId",
+      p."nickname" AS "nickname",
+      p."countryCode" AS "countryCode",
+      p."countryName" AS "countryName",
+      p."countryFlag" AS "countryFlag",
+      p."isActive" AS "isActive",
+      p."totalWins" AS "totalWins",
+      p."lastWinAt" AS "lastWinAt",
+      p."createdAt" AS "createdAt",
+      p."updatedAt" AS "updatedAt",
+      (SELECT COUNT(1) FROM "ChessWinEvent" e WHERE e."playerId" = p."id") AS "winEvents",
+      (SELECT COUNT(1) FROM "ChessChampionshipPodiumAward" a WHERE a."playerId" = p."id") AS "podiumAwards"
+    FROM "ChessPlayer" p
+    ORDER BY p."updatedAt" DESC
+    LIMIT 20
+  `;
+}
+
+function NoticeBox({ notice, type }: { notice?: string; type?: string }) {
+  if (!notice) return null;
+  const isError = type === "error";
+  return (
+    <div className={`mb-6 rounded-2xl border p-4 text-sm font-bold shadow-sm ${isError ? "border-red-200 bg-red-50 text-red-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+      {notice}
+    </div>
+  );
+}
+
 function KpiCard({ title, value, subtitle }: { title: string; value: string; subtitle?: string }) {
   return (
     <div className="rounded-2xl border bg-white p-5 shadow-sm">
@@ -556,6 +798,134 @@ function RankingTable({
   );
 }
 
+function PlayerManagement({
+  locale,
+  returnTo,
+  search,
+  players,
+  periodType,
+  periodKey,
+  categoryKey,
+}: {
+  locale: string;
+  returnTo: string;
+  search: string;
+  players: PlayerAdminRow[];
+  periodType: PeriodType;
+  periodKey: string;
+  categoryKey: string;
+}) {
+  return (
+    <div className="mb-6 rounded-2xl border bg-white shadow-sm overflow-hidden">
+      <div className="border-b bg-gray-50 px-5 py-4">
+        <h2 className="font-black text-lg">Управление игроками</h2>
+        <p className="mt-1 text-xs text-gray-500">
+          Поиск работает по точному publicId или префиксу ника. Список ограничен 30 строками, чтобы не сканировать большую базу в админке.
+        </p>
+      </div>
+
+      <div className="border-b px-5 py-4">
+        <form action={`/${locale}/chess-admin`} className="grid gap-3 lg:grid-cols-[1fr_auto]">
+          <input type="hidden" name="periodType" value={periodType} />
+          <input type="hidden" name="periodKey" value={periodType === "all" ? "" : periodKey} />
+          <input type="hidden" name="categoryKey" value={categoryKey} />
+          <input
+            name="playerSearch"
+            defaultValue={search}
+            placeholder="publicId или начало ника, например Player-ABC"
+            className="rounded-xl border bg-white px-3 py-3 font-bold outline-none focus:ring-2 focus:ring-black/10"
+          />
+          <button className="rounded-xl bg-black px-6 py-3 font-black text-white shadow-sm hover:opacity-90">
+            Найти игрока
+          </button>
+        </form>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-white text-left text-xs uppercase tracking-wide text-gray-400">
+            <tr>
+              <th className="px-5 py-3">Игрок</th>
+              <th className="px-5 py-3 text-right">Победы</th>
+              <th className="px-5 py-3 text-right">События</th>
+              <th className="px-5 py-3">Переименовать</th>
+              <th className="px-5 py-3">Удалить</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {players.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-5 py-8 text-center text-gray-400">
+                  Игроки не найдены.
+                </td>
+              </tr>
+            ) : (
+              players.map((player) => {
+                const isActive = player.isActive === true || player.isActive === 1;
+                return (
+                  <tr key={player.publicId} className="align-top hover:bg-gray-50">
+                    <td className="px-5 py-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl">{player.countryFlag}</span>
+                        <div className="min-w-0">
+                          <div className="font-black text-gray-900">{player.nickname}</div>
+                          <div className="mt-1 text-xs text-gray-500">
+                            {player.countryName} · {player.publicId}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-bold">
+                            <span className={`rounded-full px-2 py-1 ${isActive ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+                              {isActive ? "активен" : "не участвует"}
+                            </span>
+                            <span className="rounded-full bg-gray-100 px-2 py-1 text-gray-500">
+                              кубки: {formatNumber(player.podiumAwards)}
+                            </span>
+                            <span className="rounded-full bg-gray-100 px-2 py-1 text-gray-500">
+                              обновлён: {formatDate(player.updatedAt)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4 text-right font-black">{formatNumber(player.totalWins)}</td>
+                    <td className="px-5 py-4 text-right text-gray-500">{formatNumber(player.winEvents)}</td>
+                    <td className="px-5 py-4">
+                      <form action={renameChessPlayerAction} className="flex min-w-[260px] gap-2">
+                        <input type="hidden" name="returnTo" value={returnTo} />
+                        <input type="hidden" name="publicId" value={player.publicId} />
+                        <input
+                          name="nickname"
+                          defaultValue={player.nickname}
+                          maxLength={24}
+                          className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 font-bold outline-none focus:ring-2 focus:ring-black/10"
+                        />
+                        <button className="rounded-xl border bg-white px-3 py-2 font-black hover:bg-gray-50">OK</button>
+                      </form>
+                    </td>
+                    <td className="px-5 py-4">
+                      <form action={deleteChessPlayerAction} className="min-w-[280px] space-y-2">
+                        <input type="hidden" name="returnTo" value={returnTo} />
+                        <input type="hidden" name="publicId" value={player.publicId} />
+                        <input
+                          name="confirmDelete"
+                          placeholder={`DELETE ${player.publicId}`}
+                          className="w-full rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-800 outline-none focus:ring-2 focus:ring-red-200"
+                        />
+                        <button className="w-full rounded-xl bg-red-600 px-3 py-2 text-xs font-black text-white hover:bg-red-700">
+                          Удалить игрока
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default async function ChessAdminPage({
   params,
   searchParams,
@@ -572,9 +942,19 @@ export default async function ChessAdminPage({
   const periodType = normalizePeriodType(resolvedSearchParams.periodType);
   const categoryKey = normalizeCategoryKey(resolvedSearchParams.categoryKey);
   const periodKey = normalizePeriodKey(periodType, resolvedSearchParams.periodKey);
+  const playerSearch = normalizePlayerSearch(resolvedSearchParams.playerSearch);
+  const notice = normalizeScalar(resolvedSearchParams.adminNotice);
+  const noticeType = normalizeScalar(resolvedSearchParams.adminNoticeType);
   const selectedCategory = CATEGORIES.find((item) => item.key === categoryKey) || CATEGORIES[0];
+  const returnToParams = new URLSearchParams();
+  returnToParams.set("periodType", periodType);
+  if (periodType !== "all") returnToParams.set("periodKey", periodKey);
+  returnToParams.set("categoryKey", categoryKey);
+  if (playerSearch) returnToParams.set("playerSearch", playerSearch);
+  const returnTo = `/${locale}/chess-admin?${returnToParams.toString()}`;
 
   const data = await getDashboardData(periodType, periodKey, categoryKey);
+  const playerRows = data.ready ? await getPlayerAdminRows(playerSearch) : [];
 
   return (
     <div className="min-h-screen bg-[#f6f2ea]">
@@ -599,6 +979,8 @@ export default async function ChessAdminPage({
             <div>Сгенерировано: {formatDate(data.generatedAt)}</div>
           </div>
         </div>
+
+        <NoticeBox notice={notice} type={noticeType} />
 
         {!data.ready ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-900 shadow-sm">
@@ -726,6 +1108,16 @@ export default async function ChessAdminPage({
               <RankingTable title="Топ игроков" rows={data.players} type="players" />
               <RankingTable title="Топ стран" rows={data.countries} type="countries" />
             </div>
+
+            <PlayerManagement
+              locale={locale}
+              returnTo={returnTo}
+              search={playerSearch}
+              players={playerRows}
+              periodType={periodType}
+              periodKey={periodKey}
+              categoryKey={categoryKey}
+            />
 
             <div className="grid gap-6 xl:grid-cols-2">
               <div className="rounded-2xl border bg-white shadow-sm overflow-hidden">
