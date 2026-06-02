@@ -166,6 +166,7 @@ model ChessPlayer {
 
   @@index([countryCode])
   @@index([isActive, totalWins])
+  @@index([createdAt])
 }
 
 model ChessPlayerCategoryStat {
@@ -257,6 +258,8 @@ model ChessWinEvent {
   @@index([playerId, createdAt])
   @@index([categoryKey, createdAt])
   @@index([countryCode, categoryKey])
+  @@index([createdAt])
+  @@index([countryCode, createdAt])
 }
 
 
@@ -285,6 +288,8 @@ model ChessChampionshipPodiumAward {
   @@index([playerId, awardType, periodType, periodKey])
   @@index([countryCode, awardType, periodType, periodKey])
   @@index([periodType, periodKey, categoryKey, awardType])
+  @@index([createdAt])
+  @@index([finalizedAt])
 }
 
 model ChessChampionshipPodiumFinalization {
