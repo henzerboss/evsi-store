@@ -1,4 +1,5 @@
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 type WeeklyReportTextInput = {
   kind: 'text';
@@ -40,10 +41,66 @@ type WeeklyReportAiResult = {
   data_quality_note: string;
 };
 
+type MetricsLike = {
+  startDate?: string;
+  endDate?: string;
+  dataQuality?: {
+    expectedDays?: number;
+    filledDays?: number;
+    completeDays?: number;
+    entriesCount?: number;
+    hasEnoughData?: boolean;
+    hasReliableMealTypes?: boolean;
+    hasWaterData?: boolean;
+    hasWeightData?: boolean;
+    hasHealthBurnedCalories?: boolean;
+    missing?: string[];
+  };
+  score?: {
+    value?: number;
+    label?: string;
+  };
+  nutrition?: {
+    avgCalories?: number;
+    avgProtein?: number;
+    avgFat?: number;
+    avgCarbs?: number;
+    avgCaloriesDiff?: number | null;
+    caloriesPercent?: number | null;
+    proteinPercent?: number | null;
+    fatPercent?: number | null;
+    carbsPercent?: number | null;
+    daysOverCalories?: number;
+    daysUnderCalories?: number;
+    daysWithinCaloriesRange?: number;
+    daysLowProtein?: number;
+  };
+  foods?: {
+    uniqueFoodsCount?: number;
+    repeatedFoods?: Array<{ name?: string; count?: number; totalCalories?: number }>;
+    topCalorieEntries?: Array<{ name?: string; calories?: number; date?: string; mealType?: string | null }>;
+    topProteinEntries?: Array<{ name?: string; protein?: number; calories?: number }>;
+    lateMealsCount?: number | null;
+  };
+  water?: {
+    avgWaterMl?: number | null;
+    waterGoalMl?: number | null;
+    waterGoalDays?: number | null;
+    waterTrackingDays?: number;
+    waterPercent?: number | null;
+  };
+  weight?: {
+    firstWeightKg?: number | null;
+    lastWeightKg?: number | null;
+    changeKg?: number | null;
+    entriesCount?: number;
+  };
+};
+
 const REQUEST_LIMIT = 60;
 const WINDOW_MS = 60 * 60 * 1000;
-const MAX_INPUT_CHARS = 80_000;
-const MAX_PROMPT_CHARS = 12_000;
+const MAX_INPUT_CHARS = 120_000;
+const MAX_PROMPT_CHARS = 16_000;
 const MAX_ATTEMPTS_PER_MODEL = 2;
 const DELAY_BETWEEN_ATTEMPTS_MS = 900;
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
@@ -59,7 +116,6 @@ setInterval(() => {
     }
   }
 }, 10 * 60 * 1000);
-
 
 function cors(origin: string) {
   return {
@@ -114,94 +170,31 @@ Safety rules:
 Return ONLY valid JSON. Do not wrap JSON in markdown. Do not add comments.
 `.trim();
 
-const WEEKLY_REPORT_RESPONSE_SCHEMA = {
-  type: 'OBJECT',
-  properties: {
-    summary: {
-      type: 'OBJECT',
-      properties: {
-        title: { type: 'STRING' },
-        text: { type: 'STRING' },
-      },
-      required: ['title', 'text'],
-      propertyOrdering: ['title', 'text'],
-    },
-    positive_findings: {
-      type: 'ARRAY',
-      items: { type: 'STRING' },
-    },
-    focus_areas: {
-      type: 'ARRAY',
-      items: {
-        type: 'OBJECT',
-        properties: {
-          title: { type: 'STRING' },
-          why: { type: 'STRING' },
-          data: { type: 'STRING' },
-        },
-        required: ['title', 'why', 'data'],
-        propertyOrdering: ['title', 'why', 'data'],
-      },
-    },
-    recommendations: {
-      type: 'ARRAY',
-      items: {
-        type: 'OBJECT',
-        properties: {
-          title: { type: 'STRING' },
-          text: { type: 'STRING' },
-          difficulty: {
-            type: 'STRING',
-            enum: ['easy', 'medium'],
-          },
-          impact: {
-            type: 'STRING',
-            enum: ['low', 'medium', 'high'],
-          },
-        },
-        required: ['title', 'text', 'difficulty', 'impact'],
-        propertyOrdering: ['title', 'text', 'difficulty', 'impact'],
-      },
-    },
-    meal_pattern_comment: {
-      type: 'OBJECT',
-      properties: {
-        title: { type: 'STRING' },
-        text: { type: 'STRING' },
-      },
-      required: ['title', 'text'],
-      propertyOrdering: ['title', 'text'],
-    },
-    motivation: {
-      type: 'OBJECT',
-      properties: {
-        title: { type: 'STRING' },
-        text: { type: 'STRING' },
-      },
-      required: ['title', 'text'],
-      propertyOrdering: ['title', 'text'],
-    },
-    data_quality_note: { type: 'STRING' },
-  },
-  required: [
-    'summary',
-    'positive_findings',
-    'focus_areas',
-    'recommendations',
-    'meal_pattern_comment',
-    'motivation',
-    'data_quality_note',
+const responseFormatPrompt = `
+Return this exact JSON shape:
+{
+  "summary": { "title": "", "text": "" },
+  "positive_findings": [""],
+  "focus_areas": [
+    { "title": "", "why": "", "data": "" }
   ],
-  propertyOrdering: [
-    'summary',
-    'positive_findings',
-    'focus_areas',
-    'recommendations',
-    'meal_pattern_comment',
-    'motivation',
-    'data_quality_note',
+  "recommendations": [
+    { "title": "", "text": "", "difficulty": "easy", "impact": "medium" }
   ],
-} as const;
+  "meal_pattern_comment": { "title": "", "text": "" },
+  "motivation": { "title": "", "text": "" },
+  "data_quality_note": ""
+}
+
+Limits:
+- positive_findings: max 3 items
+- focus_areas: max 3 items
+- recommendations: max 4 items
+- difficulty must be "easy" or "medium"
+- impact must be "low", "medium", or "high"
+- each title: max 70 characters
+- each body text: max 220 characters
+`.trim();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -246,12 +239,25 @@ const resolveModel = (tier?: string, requestedModel?: string): string => {
   return 'gemini-2.5-flash-lite';
 };
 
-const fallbackModels = (primaryModel: string): string[] => {
-  return [
-    primaryModel,
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-lite',
-  ].filter((model, index, models) => model && models.indexOf(model) === index);
+const fallbackModels = (tier: string | undefined, primaryModel: string): string[] => {
+  const models =
+    tier === 'premium'
+      ? [
+          primaryModel,
+          'gemini-2.5-flash',
+          'gemini-2.5-flash-lite',
+          'gemini-2.0-flash',
+          'gemini-1.5-flash',
+        ]
+      : [
+          primaryModel,
+          'gemini-2.5-flash-lite',
+          'gemini-2.5-flash',
+          'gemini-2.0-flash',
+          'gemini-1.5-flash',
+        ];
+
+  return models.filter((model, index) => model && models.indexOf(model) === index);
 };
 
 const stripCodeFences = (value: string): string => {
@@ -267,19 +273,12 @@ const extractGeminiText = (raw: unknown): string => {
   }
 
   const candidates = 'candidates' in raw && Array.isArray(raw.candidates) ? raw.candidates : [];
-  const parts = candidates[0]?.content?.parts;
+  const firstCandidate = candidates[0] as { content?: { parts?: Array<{ text?: string }> } } | undefined;
+  const parts = firstCandidate?.content?.parts;
 
   if (!Array.isArray(parts)) return '';
 
-  return parts
-    .map((part: unknown) => {
-      if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
-        return part.text;
-      }
-      return '';
-    })
-    .join('\n')
-    .trim();
+  return parts.map((part) => part.text ?? '').join('\n').trim();
 };
 
 const normalizeString = (value: unknown, maxLength: number): string => {
@@ -363,31 +362,242 @@ const parseWeeklyReportJson = (text: string): WeeklyReportAiResult | null => {
   }
 };
 
+const parseMetrics = (text: string): MetricsLike | null => {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed as MetricsLike;
+  } catch {
+    return null;
+  }
+};
+
+const detectRussian = (body: WeeklyReportRequestBody): boolean => {
+  const prompt = body.prompt?.toLowerCase() ?? '';
+  return (
+    prompt.includes('write in this language: ru') ||
+    prompt.includes('write in this language: russian') ||
+    prompt.includes('language: ru') ||
+    prompt.includes('рус')
+  );
+};
+
+const asNumber = (value: unknown): number | null => {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+};
+
+const buildServerFallbackReport = (metrics: MetricsLike | null, isRussian: boolean): WeeklyReportAiResult => {
+  const score = asNumber(metrics?.score?.value);
+  const filledDays = asNumber(metrics?.dataQuality?.filledDays) ?? 0;
+  const expectedDays = asNumber(metrics?.dataQuality?.expectedDays) ?? 7;
+  const entriesCount = asNumber(metrics?.dataQuality?.entriesCount) ?? 0;
+  const avgCalories = asNumber(metrics?.nutrition?.avgCalories);
+  const avgCaloriesDiff = asNumber(metrics?.nutrition?.avgCaloriesDiff);
+  const proteinPercent = asNumber(metrics?.nutrition?.proteinPercent);
+  const daysOverCalories = asNumber(metrics?.nutrition?.daysOverCalories) ?? 0;
+  const daysLowProtein = asNumber(metrics?.nutrition?.daysLowProtein) ?? 0;
+  const uniqueFoodsCount = asNumber(metrics?.foods?.uniqueFoodsCount);
+  const repeatedFood = metrics?.foods?.repeatedFoods?.[0]?.name;
+  const topCalorieFood = metrics?.foods?.topCalorieEntries?.[0]?.name;
+  const waterPercent = asNumber(metrics?.water?.waterPercent);
+  const weightChange = asNumber(metrics?.weight?.changeKg);
+
+  if (isRussian) {
+    const positive: string[] = [];
+    if (filledDays > 0) positive.push(`Вы внесли питание за ${filledDays} из ${expectedDays} дней.`);
+    if (entriesCount > 0) positive.push(`В дневнике есть ${entriesCount} записей еды за неделю.`);
+    if (uniqueFoodsCount !== null && uniqueFoodsCount > 0) positive.push(`Рацион включает ${uniqueFoodsCount} разных блюд.`);
+
+    const focusAreas: WeeklyReportAiResult['focus_areas'] = [];
+    if (avgCaloriesDiff !== null) {
+      focusAreas.push({
+        title: avgCaloriesDiff > 0 ? 'Калории выше цели' : 'Калории ниже цели',
+        why: avgCaloriesDiff > 0
+          ? 'Небольшое ежедневное превышение может замедлять прогресс.'
+          : 'Слишком низкий калораж может ухудшать стабильность и самочувствие.',
+        data: `${avgCaloriesDiff > 0 ? '+' : ''}${Math.round(avgCaloriesDiff)} ккал в среднем`,
+      });
+    }
+    if (proteinPercent !== null && proteinPercent < 90) {
+      focusAreas.push({
+        title: 'Белок можно усилить',
+        why: 'Белок помогает с насыщением и делает рацион устойчивее.',
+        data: `${Math.round(proteinPercent)}% от цели`,
+      });
+    }
+    if (waterPercent !== null && waterPercent < 90) {
+      focusAreas.push({
+        title: 'Вода ниже цели',
+        why: 'Регулярное отслеживание воды делает недельный отчёт точнее.',
+        data: `${Math.round(waterPercent)}% от цели`,
+      });
+    }
+
+    const recommendations: WeeklyReportAiResult['recommendations'] = [
+      {
+        title: 'Сфокусируйтесь на одном улучшении',
+        text: proteinPercent !== null && proteinPercent < 90
+          ? 'Добавьте белковый продукт в один приём пищи каждый день.'
+          : 'Выберите один простой шаг на неделю и повторяйте его ежедневно.',
+        difficulty: 'easy',
+        impact: 'medium',
+      },
+      {
+        title: 'Заполните больше дней подряд',
+        text: `Следующая цель — ${Math.min(expectedDays, filledDays + 1)} из ${expectedDays} дней с записями.`,
+        difficulty: 'easy',
+        impact: 'high',
+      },
+    ];
+
+    if (avgCaloriesDiff !== null && avgCaloriesDiff > 0) {
+      recommendations.push({
+        title: 'Оставьте запас на вечер',
+        text: 'Попробуйте заранее оставить 150–250 ккал на ужин или перекус.',
+        difficulty: 'easy',
+        impact: 'medium',
+      });
+    }
+
+    return {
+      summary: {
+        title: score !== null ? `Индекс недели: ${Math.round(score)}/100` : 'Недельный разбор готов',
+        text: avgCalories !== null
+          ? `За неделю в среднем получилось ${Math.round(avgCalories)} ккал в день. Главные ориентиры — регулярность заполнения, калории и белок.`
+          : 'Данных пока немного, но уже можно увидеть первые привычки и улучшить регулярность заполнения.',
+      },
+      positive_findings: positive.slice(0, 3),
+      focus_areas: focusAreas.slice(0, 3),
+      recommendations: recommendations.slice(0, 4),
+      meal_pattern_comment: {
+        title: 'Рацион и привычки',
+        text: topCalorieFood
+          ? `Самая калорийная позиция недели: ${topCalorieFood}. ${repeatedFood ? `Чаще повторялось: ${repeatedFood}.` : 'Следите за повторяющимися блюдами.'}`
+          : 'Добавьте больше записей с типом приёма пищи, чтобы анализ рациона стал точнее.',
+      },
+      motivation: {
+        title: 'Небольшой шаг на следующую неделю',
+        text: 'Не нужно менять всё сразу. Один устойчивый шаг часто полезнее, чем идеальный план на один день.',
+      },
+      data_quality_note: weightChange !== null
+        ? `Вес за неделю изменился на ${weightChange > 0 ? '+' : ''}${weightChange} кг. На коротком периоде это может быть вода, соль и время взвешивания.`
+        : daysOverCalories || daysLowProtein
+          ? 'Выводы основаны на заполненных днях недели. Чем регулярнее записи, тем точнее рекомендации.'
+          : 'Отчёт создан по доступным данным недели.',
+    };
+  }
+
+  const positive: string[] = [];
+  if (filledDays > 0) positive.push(`You logged meals for ${filledDays} of ${expectedDays} days.`);
+  if (entriesCount > 0) positive.push(`Your diary has ${entriesCount} food entries this week.`);
+  if (uniqueFoodsCount !== null && uniqueFoodsCount > 0) positive.push(`Your week includes ${uniqueFoodsCount} different foods.`);
+
+  const focusAreas: WeeklyReportAiResult['focus_areas'] = [];
+  if (avgCaloriesDiff !== null) {
+    focusAreas.push({
+      title: avgCaloriesDiff > 0 ? 'Calories above target' : 'Calories below target',
+      why: avgCaloriesDiff > 0
+        ? 'A small daily surplus can slow progress over time.'
+        : 'Very low intake can make consistency and energy harder.',
+      data: `${avgCaloriesDiff > 0 ? '+' : ''}${Math.round(avgCaloriesDiff)} kcal on average`,
+    });
+  }
+  if (proteinPercent !== null && proteinPercent < 90) {
+    focusAreas.push({
+      title: 'Protein can be stronger',
+      why: 'Protein supports satiety and makes the plan easier to follow.',
+      data: `${Math.round(proteinPercent)}% of target`,
+    });
+  }
+  if (waterPercent !== null && waterPercent < 90) {
+    focusAreas.push({
+      title: 'Water is below target',
+      why: 'Tracking water more regularly makes the weekly report more accurate.',
+      data: `${Math.round(waterPercent)}% of target`,
+    });
+  }
+
+  const recommendations: WeeklyReportAiResult['recommendations'] = [
+    {
+      title: 'Focus on one improvement',
+      text: proteinPercent !== null && proteinPercent < 90
+        ? 'Add one protein-rich food to one meal each day.'
+        : 'Choose one simple habit for the week and repeat it daily.',
+      difficulty: 'easy',
+      impact: 'medium',
+    },
+    {
+      title: 'Log one more day',
+      text: `Next goal: ${Math.min(expectedDays, filledDays + 1)} of ${expectedDays} days with meals logged.`,
+      difficulty: 'easy',
+      impact: 'high',
+    },
+  ];
+
+  if (avgCaloriesDiff !== null && avgCaloriesDiff > 0) {
+    recommendations.push({
+      title: 'Keep calories for evening',
+      text: 'Try leaving 150–250 kcal for dinner or a snack in advance.',
+      difficulty: 'easy',
+      impact: 'medium',
+    });
+  }
+
+  return {
+    summary: {
+      title: score !== null ? `Weekly score: ${Math.round(score)}/100` : 'Weekly review is ready',
+      text: avgCalories !== null
+        ? `Your average was ${Math.round(avgCalories)} kcal per day. The main signals are logging consistency, calories, and protein.`
+        : 'There is not much data yet, but the first habits are already visible.',
+    },
+    positive_findings: positive.slice(0, 3),
+    focus_areas: focusAreas.slice(0, 3),
+    recommendations: recommendations.slice(0, 4),
+    meal_pattern_comment: {
+      title: 'Food patterns',
+      text: topCalorieFood
+        ? `Highest-calorie entry: ${topCalorieFood}. ${repeatedFood ? `Most repeated: ${repeatedFood}.` : 'Keep an eye on repeated foods.'}`
+        : 'Add more entries with meal type to make meal pattern analysis more accurate.',
+    },
+    motivation: {
+      title: 'One step for next week',
+      text: 'You do not need to change everything at once. One repeatable step is better than a perfect one-day plan.',
+    },
+    data_quality_note: weightChange !== null
+      ? `Weight changed by ${weightChange > 0 ? '+' : ''}${weightChange} kg this week. Short-term changes can reflect water, salt, and weighing time.`
+      : daysOverCalories || daysLowProtein
+        ? 'Insights are based on the logged days. More consistent logging makes recommendations more accurate.'
+        : 'This report is based on available weekly data.',
+  };
+};
+
 const buildUserPrompt = (body: WeeklyReportRequestBody): string => {
   const systemPrompt = body.prompt?.trim().slice(0, MAX_PROMPT_CHARS) || fallbackWeeklyPrompt;
   const weeklyData = body.input?.text?.trim().slice(0, MAX_INPUT_CHARS) ?? '';
 
-  return `${systemPrompt}\n\nAggregated weekly data JSON:\n${weeklyData}`;
+  return `${systemPrompt}\n\n${responseFormatPrompt}\n\nAggregated weekly data JSON:\n${weeklyData}`;
 };
 
 const buildGeminiPayload = (body: WeeklyReportRequestBody) => ({
   contents: [
     {
-      role: 'user',
       parts: [{ text: buildUserPrompt(body) }],
     },
   ],
   generationConfig: {
-    temperature: 0.75,
-    topP: 0.95,
-    maxOutputTokens: 1800,
+    temperature: 0.65,
+    topP: 0.9,
+    maxOutputTokens: 1400,
     responseMimeType: 'application/json',
-    responseSchema: WEEKLY_REPORT_RESPONSE_SCHEMA,
+    thinkingConfig: {
+      thinkingBudget: 0,
+    },
   },
 });
 
 const callGeminiWithFallback = async (
   apiKey: string,
+  tier: string | undefined,
   primaryModel: string,
   payload: unknown
 ): Promise<{
@@ -395,7 +605,7 @@ const callGeminiWithFallback = async (
   text: string;
   model: string;
 }> => {
-  const models = fallbackModels(primaryModel);
+  const models = fallbackModels(tier, primaryModel);
 
   let lastResponse: Response | null = null;
   let lastText = '';
@@ -521,16 +731,17 @@ export async function POST(req: Request) {
 
   const primaryModel = resolveModel(body.tier, body.model);
   const payload = buildGeminiPayload(body);
-  const result = await callGeminiWithFallback(apiKey, primaryModel, payload);
+  const metrics = parseMetrics(body.input.text);
+  const isRussian = detectRussian(body);
+  const result = await callGeminiWithFallback(apiKey, body.tier, primaryModel, payload);
 
   if (!result.response.ok) {
-    return new Response(result.text, {
-      status: result.response.status,
-      headers: {
-        ...headers,
-        'Content-Type': 'application/json',
-        'X-Gemini-Model-Used': result.model,
-      },
+    const fallback = buildServerFallbackReport(metrics, isRussian);
+
+    return jsonResponse(fallback, 200, headers, {
+      'X-Gemini-Model-Used': result.model,
+      'X-Weekly-Report-Fallback': 'gemini-unavailable',
+      'X-Upstream-Status': String(result.response.status),
     });
   }
 
@@ -539,24 +750,24 @@ export async function POST(req: Request) {
   try {
     geminiJson = JSON.parse(result.text);
   } catch {
-    return jsonResponse(
-      { error: 'Invalid Gemini JSON response' },
-      502,
-      headers,
-      { 'X-Gemini-Model-Used': result.model }
-    );
+    const fallback = buildServerFallbackReport(metrics, isRussian);
+
+    return jsonResponse(fallback, 200, headers, {
+      'X-Gemini-Model-Used': result.model,
+      'X-Weekly-Report-Fallback': 'invalid-gemini-json',
+    });
   }
 
   const responseText = extractGeminiText(geminiJson);
   const weeklyReport = parseWeeklyReportJson(responseText) ?? normalizeAiResult(geminiJson);
 
   if (!weeklyReport) {
-    return jsonResponse(
-      { error: 'Unable to parse weekly report response' },
-      502,
-      headers,
-      { 'X-Gemini-Model-Used': result.model }
-    );
+    const fallback = buildServerFallbackReport(metrics, isRussian);
+
+    return jsonResponse(fallback, 200, headers, {
+      'X-Gemini-Model-Used': result.model,
+      'X-Weekly-Report-Fallback': 'parse-failed',
+    });
   }
 
   return jsonResponse(weeklyReport, 200, headers, {
