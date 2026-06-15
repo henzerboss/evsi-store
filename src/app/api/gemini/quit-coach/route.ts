@@ -61,8 +61,8 @@ export async function POST(req: Request) {
       headers: { ...headers, 'Content-Type': 'application/json' },
     });
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return json({ error: 'GEMINI_API_KEY missing' }, 500);
+  const apiKey = process.env.GEMINI_API_KEY_QUITSMOKE;
+  if (!apiKey) return json({ error: 'GEMINI_API_KEY_QUITSMOKE missing' }, 500);
 
   // Optional shared token to stop calls "from the street".
   const serverToken = process.env.SERVER_CLIENT_TOKEN;
