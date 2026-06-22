@@ -280,16 +280,22 @@ export async function POST(req: Request) {
     });
   }
 
+  const isPremium = body.tier === 'premium';
+
   const payload = {
     contents: [{ parts }],
     generationConfig: {
       responseMimeType: 'application/json',
-      maxOutputTokens: 1024,
-      temperature: 0.4,
-      // Отключаем "рассуждения": на составных блюдах thinking схлопывал
-      // тарелку до одного компонента и стоил вдвое больше токенов.
+      // Premium возвращает расширенный профиль нутриентов, поэтому ему нужен
+      // больший лимит ответа. Free оставляем прежним, чтобы не менять стоимость
+      // и поведение существующего сценария.
+      maxOutputTokens: isPremium ? 4096 : 1024,
+      temperature: isPremium ? 0.25 : 0.4,
+      // Thinking управляется именно на backend-route, а не в приложении.
+      // Free оставляем быстрым и дешёвым. Premium включаем с ограниченным
+      // бюджетом, чтобы лучше разбирать составные блюда и полный список нутриентов.
       thinkingConfig: {
-        thinkingBudget: 0,
+        thinkingBudget: isPremium ? 1024 : 0,
       },
     },
   };
