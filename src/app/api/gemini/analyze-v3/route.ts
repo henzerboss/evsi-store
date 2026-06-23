@@ -464,12 +464,12 @@ export async function POST(req: Request) {
       // больший лимит ответа. Free оставляем прежним, чтобы не менять стоимость
       // и поведение базового сценария.
       maxOutputTokens: isPremium ? 4096 : 1024,
-      temperature: isPremium ? 0.25 : 0.4,
+      temperature: isPremium ? 0.2 : 0.2,
       // Thinking управляется именно на backend-route, а не в приложении.
       // Free оставляем быстрым и дешёвым. Premium включаем с ограниченным
       // бюджетом, чтобы лучше разбирать составные блюда и полный список нутриентов.
       thinkingConfig: {
-        thinkingBudget: isPremium ? 1024 : 0,
+        thinkingBudget: isPremium ? 512 : 0,
       },
     },
   };
