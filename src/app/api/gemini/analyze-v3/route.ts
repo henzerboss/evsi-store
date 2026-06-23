@@ -238,7 +238,7 @@ const buildPrompt = (input: AnalyzeInput, tier?: string, locale?: string | null)
 //   остальные (free / прочее) -> gemini-2.5-flash-lite (баланс цена/качество)
 const resolveModel = (tier?: string): string => {
   if (tier === 'premium') {
-    return 'gemini-2.5-flash';
+    return 'gemini-2.5-flash-lite';
   }
 
   return 'gemini-2.5-flash-lite';
@@ -264,8 +264,8 @@ const fallbackModels = (
     tier === 'premium'
       ? [
           primaryModel,
-          'gemini-2.5-flash',
           'gemini-2.5-flash-lite',
+          'gemini-2.5-flash',
         ]
       : [
           primaryModel,

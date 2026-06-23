@@ -233,7 +233,7 @@ const resolveModel = (tier?: string, requestedModel?: string): string => {
   }
 
   if (tier === 'premium') {
-    return 'gemini-2.5-flash';
+    return 'gemini-2.5-flash-lite';
   }
 
   return 'gemini-2.5-flash-lite';
@@ -244,8 +244,8 @@ const fallbackModels = (tier: string | undefined, primaryModel: string): string[
     tier === 'premium'
       ? [
           primaryModel,
-          'gemini-2.5-flash',
           'gemini-2.5-flash-lite',
+          'gemini-2.5-flash',
           'gemini-2.0-flash',
           'gemini-1.5-flash',
         ]
