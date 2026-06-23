@@ -10,9 +10,9 @@ const RecipeRequestSchema = z.object({
   feature: z.enum(['recipe_generate', 'recipe_refine', 'scan_image', 'scan_audio', 'meal_plan']),
   locale: z.enum(['en', 'ru']).default('en'),
   products: z.array(z.string()).default([]),
-  filters: z.record(z.string(), z.any()).default({}),
-  profile: z.record(z.string(), z.any()).default({}),
-  currentRecipe: z.record(z.string(), z.any()).optional(),
+  filters: z.record(z.string(), z.unknown()).default({}),
+  profile: z.record(z.string(), z.unknown()).default({}),
+  currentRecipe: z.record(z.string(), z.unknown()).optional(),
   instruction: z.string().optional(),
   imageBase64: z.string().optional(),
   imageMimeType: z.string().optional(),
@@ -33,6 +33,31 @@ export async function OPTIONS(req: NextRequest) {
   return new Response(null, { status: 204, headers: cors(req.headers.get('origin') ?? '') });
 }
 
+
+type RevenueCatSubscriberResponse = {
+  subscriber?: {
+    entitlements?: Record<string, { expires_date?: string | null }>;
+  };
+};
+
+type GeminiInlinePart = {
+  inline_data: {
+    mime_type: string;
+    data: string;
+  };
+};
+
+type GeminiTextPart = { text: string };
+type GeminiPart = GeminiTextPart | GeminiInlinePart;
+
+type GeminiResponse = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{ text?: string }>;
+    };
+  }>;
+};
+
 async function validateRevenueCatEntitlement(appUserId: string | null) {
   if (process.env.RECIPE_AI_REQUIRE_REVENUECAT !== 'true') return true;
   if (!appUserId) return false;
@@ -45,50 +70,53 @@ async function validateRevenueCatEntitlement(appUserId: string | null) {
     cache: 'no-store',
   });
   if (!response.ok) return false;
-  const json = await response.json();
-  const expiresDate = json?.subscriber?.entitlements?.[entitlement]?.expires_date;
+  const json = (await response.json()) as RevenueCatSubscriberResponse;
+  const expiresDate = json.subscriber?.entitlements?.[entitlement]?.expires_date;
   if (expiresDate === null) return true;
   return typeof expiresDate === 'string' && new Date(expiresDate).getTime() > Date.now();
 }
 
-function systemPrompt(locale: Locale) {
-  if (locale === 'ru') {
-    return `Ты кулинарный ИИ-ассистент для приложения дневника рецептов. Отвечай только валидным JSON без markdown. Язык ответа: русский.
-Требования:
-- Учитывай продукты пользователя, технику, аллергии, нелюбимые продукты, бюджет, диету, порции, уровень готовки.
-- Не морализируй про здоровье. Просто соблюдай фильтры.
-- Маркируй рецепт: verified, adapted или generated.
-- verified только для традиционного блюда без существенных изменений.
-- adapted если взял известное блюдо и изменил под продукты пользователя.
-- generated если придумал новый рецепт.
-- Для аллергенов и противопоказаний не предлагай опасные ингредиенты.
-- Возвращай practical steps, понятные новичку, если уровень beginner.
-- Если не хватает 1-2 ингредиентов, заполни missingItems.
-- Не выдумывай точную медицинскую информацию.`;
-  }
-  return `You are a cooking AI assistant for a recipe diary app. Return valid JSON only, no markdown. Response language: English.
-Requirements:
-- Respect user's products, equipment, allergies, dislikes, budget, diet, servings and cooking level.
-- Do not moralize about health; just apply filters.
-- Mark recipe as verified, adapted or generated.
-- verified only for a traditional dish without meaningful changes.
-- adapted if you modify a known dish for the user's pantry.
-- generated if you invent a new recipe.
-- Avoid allergens and contraindicated ingredients.
-- Use beginner-friendly steps if cooking level is beginner.
-- If only 1-2 ingredients are missing, fill missingItems.
-- Do not invent medical certainty.`;
+function languageName(locale: Locale) {
+  return locale === 'ru' ? 'Russian' : 'English';
 }
 
-function responseShape(locale: Locale) {
-  const title = locale === 'ru' ? 'Название рецепта' : 'Recipe title';
-  return `Return JSON in one of these shapes:
+function systemPrompt(locale: Locale) {
+  return `You are a cooking AI assistant for a local-first recipe diary app.
+Return valid JSON only. Do not wrap the answer in markdown.
+The response language must be ${languageName(locale)}.
+
+Core rules:
+- Respect the user's available products, equipment, allergies, contraindications, disliked foods, budget mode, diet modes, serving count and cooking level.
+- Do not moralize about health. Apply diet and budget filters neutrally.
+- Never include ingredients that conflict with the user's allergies or explicit contraindications.
+- Mark every recipe as one of: verified, adapted, generated.
+- Use verified only for a traditional or widely-known dish that is not meaningfully changed.
+- Use adapted when you modify a known dish for the user's pantry, equipment, diet, budget, time or serving count.
+- Use generated when you create a new recipe idea from the available products.
+- If only 1-2 ingredients are missing, fill missingItems and use status almost_ready.
+- If all required ingredients are available, use status can_cook_now.
+- If more than 2 important ingredients are missing, use status needs_shopping.
+- Explain why the recipe was suggested in the why array.
+- For beginner cooking level, make steps explicit and practical.
+- For confident cooking level, steps may be shorter but still safe and clear.
+- Do not invent medical certainty or claim professional medical advice.
+- Keep quantities realistic for the requested serving count.
+- Prefer common household ingredients unless the user allows non-budget or special ingredients.
+- If a photo/audio scan is uncertain, include a short uncertainty note in message and return the most likely products only.`;
+}
+
+function responseShape() {
+  return `Return JSON in one of these shapes. All user-facing strings must be written in the requested response language.
 For recipe_generate or meal_plan:
-{"recipes":[{"id":"string","title":"${title}","subtitle":"string","kind":"verified|adapted|generated","status":"can_cook_now|almost_ready|needs_shopping","timeMinutes":30,"difficulty":"easy|medium|hard","servings":2,"cuisine":"string","missingItems":["string"],"matchScore":90,"why":["string"],"ingredients":[{"name":"string","amount":"string","required":true,"available":true,"canSubstitute":false}],"steps":["string"],"substitutions":["string"],"calories":420,"protein":25,"carbs":40,"fat":18,"source":"ai","createdAt":"ISO_DATE"}]}
+{"recipes":[{"id":"string","title":"localized recipe title","subtitle":"localized subtitle","kind":"verified|adapted|generated","status":"can_cook_now|almost_ready|needs_shopping","timeMinutes":30,"difficulty":"easy|medium|hard","servings":2,"cuisine":"localized cuisine name","missingItems":["localized ingredient name"],"matchScore":90,"why":["localized reason"],"ingredients":[{"name":"localized ingredient name","amount":"localized amount","required":true,"available":true,"canSubstitute":false}],"steps":["localized cooking step"],"substitutions":["localized substitution"],"calories":420,"protein":25,"carbs":40,"fat":18,"source":"ai","createdAt":"ISO_DATE"}]}
 For recipe_refine:
 {"recipe":{same recipe object}}
 For scan_image or scan_audio:
-{"products":["ingredient names"],"message":"short message"}`;
+{"products":["localized ingredient names"],"message":"localized short message"}`;
+}
+
+function numberFromUnknown(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
 function mockResponse(payload: z.infer<typeof RecipeRequestSchema>) {
@@ -98,7 +126,7 @@ function mockResponse(payload: z.infer<typeof RecipeRequestSchema>) {
   }
   const title = payload.locale === 'ru' ? 'Быстрый ужин из ваших продуктов' : 'Quick dinner from your pantry';
   const steps = payload.locale === 'ru' ? ['Подготовьте продукты.', 'Обжарьте основу на сковороде.', 'Добавьте остальные ингредиенты и доведите до готовности.'] : ['Prepare ingredients.', 'Cook the base in a skillet.', 'Add remaining ingredients and finish cooking.'];
-  const recipe = { id: `recipe_${Date.now()}`, title, kind: payload.feature === 'recipe_refine' ? 'adapted' : 'generated', status: 'can_cook_now', timeMinutes: 25, difficulty: 'easy', servings: payload.filters?.servings ?? 2, missingItems: [], matchScore: 88, why: ['mock'], ingredients: payload.products.map((name: string) => ({ name, required: true, available: true })), steps, substitutions: [], source: 'ai', createdAt: now };
+  const recipe = { id: `recipe_${Date.now()}`, title, kind: payload.feature === 'recipe_refine' ? 'adapted' : 'generated', status: 'can_cook_now', timeMinutes: 25, difficulty: 'easy', servings: numberFromUnknown(payload.filters.servings, 2), missingItems: [], matchScore: 88, why: ['mock'], ingredients: payload.products.map((name: string) => ({ name, required: true, available: true })), steps, substitutions: [], source: 'ai', createdAt: now };
   return NextResponse.json(payload.feature === 'recipe_refine' ? { recipe } : { recipes: [recipe] });
 }
 
@@ -107,7 +135,8 @@ export async function POST(req: NextRequest) {
   try {
     const serverToken = process.env.SERVER_CLIENT_TOKEN || process.env.RECIPE_AI_CLIENT_TOKEN;
     const clientToken = req.headers.get('x-client-token');
-    if (serverToken && clientToken !== serverToken) {
+    const requireClientToken = process.env.RECIPE_AI_REQUIRE_CLIENT_TOKEN === 'true';
+    if (requireClientToken && serverToken && clientToken !== serverToken) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403, headers });
     }
 
@@ -134,10 +163,10 @@ export async function POST(req: NextRequest) {
       profile: payload.profile,
       currentRecipe: payload.currentRecipe,
       instruction: payload.instruction,
-      responseShape: responseShape(payload.locale),
+      responseShape: responseShape(),
     });
 
-    const parts: any[] = [
+    const parts: GeminiPart[] = [
       { text: systemPrompt(payload.locale) },
       { text: userText },
     ];
@@ -161,7 +190,7 @@ export async function POST(req: NextRequest) {
       }),
     });
 
-    const json = await geminiResponse.json();
+    const json = (await geminiResponse.json()) as GeminiResponse;
     if (!geminiResponse.ok) {
       return NextResponse.json({ error: 'Gemini request failed', details: json }, { status: geminiResponse.status, headers });
     }
