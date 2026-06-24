@@ -85,13 +85,15 @@ Each recipe object MUST have exactly:
 }
 Set "have": true for ingredients that are in the user's provided list, false otherwise.`;
 
+type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
+
 export async function callGemini(systemInstruction: string, userPrompt: string, imageBase64?: string) {
   const apiKey = process.env.RECIPE_GEMINI_API_KEY;
   if (!apiKey) {
     return { ok: false as const, status: 500, error: 'RECIPE_GEMINI_API_KEY missing' };
   }
 
-  const parts: any[] = [{ text: userPrompt }];
+  const parts: GeminiPart[] = [{ text: userPrompt }];
   if (imageBase64) {
     parts.push({ inlineData: { mimeType: 'image/jpeg', data: imageBase64 } });
   }
@@ -112,7 +114,9 @@ export async function callGemini(systemInstruction: string, userPrompt: string, 
     return { ok: false as const, status: res.status, error: detail || 'Gemini error' };
   }
 
-  const json = await res.json();
+  const json: {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+  } = await res.json();
   const text: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
   return { ok: true as const, text };
 }
