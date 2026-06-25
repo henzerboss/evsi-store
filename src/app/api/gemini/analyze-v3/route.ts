@@ -1,5 +1,9 @@
 export const runtime = 'nodejs';
 
+declare const process: {
+  env: Record<string, string | undefined>;
+};
+
 type AnalyzeInput =
   | { kind: 'image'; mimeType: string; data: string }
   | { kind: 'audio'; mimeType: string; data: string }
@@ -233,15 +237,79 @@ const buildPrompt = (input: AnalyzeInput, tier?: string, locale?: string | null)
   return buildFreePrompt(input, locale);
 };
 
-// Primary-модель в зависимости от tier:
-//   premium -> gemini-2.5-flash (лучшее качество)
-//   остальные (free / прочее) -> gemini-2.5-flash-lite (баланс цена/качество)
-const resolveModel = (tier?: string): string => {
-  if (tier === 'premium') {
-    return 'gemini-2.5-flash-lite';
+// Настройки генерации и порядок моделей берём из env, чтобы менять их без правок кода.
+type AnalyzeTier = 'free' | 'premium';
+
+interface GenerationSettings {
+  maxOutputTokens: number;
+  temperature: number;
+  thinkingBudget: number;
+}
+
+const DEFAULT_FREE_MODEL_ORDER = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+const DEFAULT_PREMIUM_MODEL_ORDER = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+
+const normalizeTier = (tier?: string): AnalyzeTier =>
+  tier === 'premium' ? 'premium' : 'free';
+
+const uniqueNonEmpty = (values: string[]): string[] => [
+  ...new Set(values.map((value) => value.trim()).filter(Boolean)),
+];
+
+const readModelOrderEnv = (envName: string, fallback: string[]): string[] => {
+  const rawValue = process.env[envName];
+  const envModels = rawValue ? uniqueNonEmpty(rawValue.split(',')) : [];
+
+  return envModels.length > 0 ? envModels : fallback;
+};
+
+const readNumberEnv = (envName: string, fallback: number): number => {
+  const rawValue = process.env[envName];
+
+  if (!rawValue) {
+    return fallback;
   }
 
-  return 'gemini-2.5-flash-lite';
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const readPositiveIntegerEnv = (envName: string, fallback: number): number => {
+  const parsed = Math.trunc(readNumberEnv(envName, fallback));
+  return parsed > 0 ? parsed : fallback;
+};
+
+const readNonNegativeIntegerEnv = (envName: string, fallback: number): number => {
+  const parsed = Math.trunc(readNumberEnv(envName, fallback));
+  return parsed >= 0 ? parsed : fallback;
+};
+
+const getModelOrder = (tier?: string): string[] => {
+  const normalizedTier = normalizeTier(tier);
+
+  if (normalizedTier === 'premium') {
+    return readModelOrderEnv('GEMINI_PREMIUM_MODEL_ORDER', DEFAULT_PREMIUM_MODEL_ORDER);
+  }
+
+  return readModelOrderEnv('GEMINI_FREE_MODEL_ORDER', DEFAULT_FREE_MODEL_ORDER);
+};
+
+const getGenerationSettings = (tier?: string): GenerationSettings => {
+  const normalizedTier = normalizeTier(tier);
+
+  if (normalizedTier === 'premium') {
+    return {
+      maxOutputTokens: readPositiveIntegerEnv('GEMINI_PREMIUM_MAX_OUTPUT_TOKENS', 4096),
+      temperature: readNumberEnv('GEMINI_PREMIUM_TEMPERATURE', 0.2),
+      thinkingBudget: readNonNegativeIntegerEnv('GEMINI_PREMIUM_THINKING_BUDGET', 512),
+    };
+  }
+
+  return {
+    maxOutputTokens: readPositiveIntegerEnv('GEMINI_FREE_MAX_OUTPUT_TOKENS', 1024),
+    temperature: readNumberEnv('GEMINI_FREE_TEMPERATURE', 0.2),
+    thinkingBudget: readNonNegativeIntegerEnv('GEMINI_FREE_THINKING_BUDGET', 0),
+  };
 };
 
 // --- НАЧАЛО БЛОКА GEMINI FALLBACK ---
@@ -253,40 +321,15 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS_PER_MODEL = 2;
 const DELAY_BETWEEN_ATTEMPTS_MS = 1000;
 
-// Порядок fallback зависит от tier.
-//   premium:        flash -> flash-lite
-//   free / прочее:  flash-lite -> flash
-const fallbackModels = (
-  tier: string | undefined,
-  primaryModel: string
-): string[] => {
-  const models =
-    tier === 'premium'
-      ? [
-          primaryModel,
-          'gemini-2.5-flash-lite',
-          'gemini-2.5-flash',
-        ]
-      : [
-          primaryModel,
-          'gemini-2.5-flash-lite',
-          'gemini-2.5-flash',
-        ];
-
-  return [...new Set(models)];
-};
-
 const callGeminiWithFallback = async (
   apiKey: string,
-  tier: string | undefined,
-  primaryModel: string,
+  models: string[],
   payload: unknown
 ): Promise<{
   response: Response;
   text: string;
   model: string;
 }> => {
-  const models = fallbackModels(tier, primaryModel);
 
   let lastResponse: Response | null = null;
   let lastText = '';
@@ -435,7 +478,8 @@ export async function POST(req: Request) {
     });
   }
 
-  const model = resolveModel(body.tier);
+  const modelOrder = getModelOrder(body.tier);
+  const generationSettings = getGenerationSettings(body.tier);
 
   const parts: Array<Record<string, unknown>> = [
     {
@@ -454,27 +498,19 @@ export async function POST(req: Request) {
     });
   }
 
-  const isPremium = body.tier === 'premium';
-
   const payload = {
     contents: [{ parts }],
     generationConfig: {
       responseMimeType: 'application/json',
-      // Premium возвращает расширенный профиль нутриентов, поэтому ему нужен
-      // больший лимит ответа. Free оставляем прежним, чтобы не менять стоимость
-      // и поведение базового сценария.
-      maxOutputTokens: isPremium ? 4096 : 1024,
-      temperature: isPremium ? 0.2 : 0.2,
-      // Thinking управляется именно на backend-route, а не в приложении.
-      // Free оставляем быстрым и дешёвым. Premium включаем с ограниченным
-      // бюджетом, чтобы лучше разбирать составные блюда и полный список нутриентов.
+      maxOutputTokens: generationSettings.maxOutputTokens,
+      temperature: generationSettings.temperature,
       thinkingConfig: {
-        thinkingBudget: isPremium ? 512 : 0,
+        thinkingBudget: generationSettings.thinkingBudget,
       },
     },
   };
 
-  const result = await callGeminiWithFallback(apiKey, body.tier, model, payload);
+  const result = await callGeminiWithFallback(apiKey, modelOrder, payload);
 
   return new Response(result.text, {
     status: result.response.status,
@@ -484,6 +520,7 @@ export async function POST(req: Request) {
 
       // Можно смотреть в Network/логах, какая модель реально ответила
       'X-Gemini-Model-Used': result.model,
+      'X-Gemini-Model-Order': modelOrder.join(','),
       'X-CalorieCounterAI-Analyze-Version': 'v3',
     },
   });
