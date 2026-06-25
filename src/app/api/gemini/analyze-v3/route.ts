@@ -113,25 +113,53 @@ const getLanguageName = (locale: string): string => {
   }
 };
 
-const buildLanguageInstruction = (locale?: string | null): string => {
+const buildLanguageInstruction = (
+  locale?: string | null,
+  mode: 'free' | 'premium' = 'free'
+): string => {
   const safeLocale = sanitizeLocale(locale);
   const languageName = getLanguageName(safeLocale);
 
-  return [
+  const baseRules = [
     `The user's app locale is ${safeLocale} (${languageName}).`,
-    `Write user-facing text values only in ${languageName}: the top-level "name" and every "components[].name".`,
-    'Do not translate JSON keys, nutrient keys, units, numbers, boolean values, or null.',
-    'Keep these architecture keys exactly as written: name, weight_g, calories_per_100g, protein_per_100g, fat_per_100g, carbs_per_100g, components, nutrients_per_100g.',
-    `Keep every nutrient key exactly as written: ${NUTRIENT_KEYS.join(', ')}.`,
+    mode === 'premium'
+      ? `Write user-facing text values only in ${languageName}: the top-level "name" and every "components[].name".`
+      : `Write user-facing text values only in ${languageName}: the top-level "name".`,
+    'Do not translate JSON keys, units, numbers, boolean values, or null.',
+  ];
+
+  if (mode === 'premium') {
+    return [
+      ...baseRules,
+      'Do not translate nutrient keys.',
+      'Keep these architecture keys exactly as written: name, weight_g, calories_per_100g, protein_per_100g, fat_per_100g, carbs_per_100g, components, nutrients_per_100g.',
+      `Keep every nutrient key exactly as written: ${NUTRIENT_KEYS.join(', ')}.`,
+      'Use a dot as the decimal separator in numbers, even when the app language normally uses commas.',
+    ].join('\n');
+  }
+
+  return [
+    ...baseRules,
+    'Keep these JSON keys exactly as written: name, weight_g, calories_per_100g, protein_per_100g, fat_per_100g, carbs_per_100g.',
     'Use a dot as the decimal separator in numbers, even when the app language normally uses commas.',
   ].join('\n');
 };
 
-const COMMON_OUTPUT_RULES = `
+const BASE_OUTPUT_RULES = `
 Return JSON only. Do not wrap the response in Markdown.
 All nutrition values must be estimates per 100 g of the final combined food/meal unless the key is weight_g.
-weight_g and components[].weight_g are total estimated grams.
 Use numbers, not strings, for numeric values.
+`;
+
+const FREE_OUTPUT_RULES = `
+${BASE_OUTPUT_RULES}
+weight_g is the total estimated grams.
+Use null only when the food cannot be identified.
+`;
+
+const PREMIUM_OUTPUT_RULES = `
+${BASE_OUTPUT_RULES}
+weight_g and components[].weight_g are total estimated grams.
 Use null only when the food cannot be identified or when a premium nutrient is genuinely impossible to estimate.
 `;
 
@@ -167,7 +195,7 @@ Units implied by keys:
 `;
 
 const buildFreePrompt = (input: AnalyzeInput, locale?: string | null): string => {
-  const languageInstruction = buildLanguageInstruction(locale);
+  const languageInstruction = buildLanguageInstruction(locale, 'free');
 
   const task = (() => {
     if (input.kind === 'text') {
@@ -189,7 +217,7 @@ const buildFreePrompt = (input: AnalyzeInput, locale?: string | null): string =>
   return [
     task,
     languageInstruction,
-    COMMON_OUTPUT_RULES,
+    FREE_OUTPUT_RULES,
     `Use exactly this JSON shape for Free users: ${FREE_SCHEMA}`,
     'If you cannot identify food and the special image compliment case does not apply, return JSON with null values.',
     userText,
@@ -197,7 +225,7 @@ const buildFreePrompt = (input: AnalyzeInput, locale?: string | null): string =>
 };
 
 const buildPremiumPrompt = (input: AnalyzeInput, locale?: string | null): string => {
-  const languageInstruction = buildLanguageInstruction(locale);
+  const languageInstruction = buildLanguageInstruction(locale, 'premium');
 
   const task = (() => {
     if (input.kind === 'text') {
@@ -218,7 +246,7 @@ const buildPremiumPrompt = (input: AnalyzeInput, locale?: string | null): string
     'Estimate one combined meal entry with total weight in grams and nutrition per 100 g for the whole meal.',
     'Also estimate component weights so their sum approximately matches weight_g.',
     languageInstruction,
-    COMMON_OUTPUT_RULES,
+    PREMIUM_OUTPUT_RULES,
     UNITS_INSTRUCTION,
     `Use exactly this JSON shape for Premium users: ${PREMIUM_SCHEMA}`,
     'For nutrients_per_100g, make a best-effort estimate for every listed nutrient using typical food composition data for the identified ingredients.',
@@ -246,8 +274,8 @@ interface GenerationSettings {
   thinkingBudget: number;
 }
 
-const DEFAULT_FREE_MODEL_ORDER = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
-const DEFAULT_PREMIUM_MODEL_ORDER = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const DEFAULT_FREE_MODEL_ORDER = ['gemini-2.5-flash-lite', 'gemini-3.1-flash-lite'];
+const DEFAULT_PREMIUM_MODEL_ORDER = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
 
 const normalizeTier = (tier?: string): AnalyzeTier =>
   tier === 'premium' ? 'premium' : 'free';
@@ -301,7 +329,7 @@ const getGenerationSettings = (tier?: string): GenerationSettings => {
     return {
       maxOutputTokens: readPositiveIntegerEnv('GEMINI_PREMIUM_MAX_OUTPUT_TOKENS', 4096),
       temperature: readNumberEnv('GEMINI_PREMIUM_TEMPERATURE', 0.2),
-      thinkingBudget: readNonNegativeIntegerEnv('GEMINI_PREMIUM_THINKING_BUDGET', 512),
+      thinkingBudget: readNonNegativeIntegerEnv('GEMINI_PREMIUM_THINKING_BUDGET', 0),
     };
   }
 

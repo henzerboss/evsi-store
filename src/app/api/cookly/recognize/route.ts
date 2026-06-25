@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 interface RecognizeBody {
   locale: string;
   imageBase64: string;
-}
+} 
 
 export async function OPTIONS(req: Request) {
   return new Response(null, { status: 204, headers: cors(req.headers.get('origin') ?? '') });

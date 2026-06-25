@@ -16,6 +16,8 @@ interface GenerateBody {
   method: 'photo' | 'voice' | 'text' | 'pantry';
   ingredients: string[];
   imageBase64?: string;
+  requestedCategories?: string[];
+  knownCategories?: string[];
   profile: Profile;
 }
 
@@ -48,13 +50,21 @@ export async function POST(req: Request) {
   const system = buildSystemInstruction(body.locale, body.profile ?? {});
 
   const ingredientList = (body.ingredients ?? []).filter(Boolean).join(', ');
+  const known = (body.knownCategories ?? []).filter(Boolean);
+  const wanted = (body.requestedCategories ?? []).filter(Boolean);
+  const categoryHint =
+    (known.length ? `Known categories to choose from: ${known.join(', ')}. ` : '') +
+    (wanted.length ? `The user wants to cook something in these categories: ${wanted.join(', ')} — strongly prefer recipes that fit them. ` : '');
+ 
   const userPrompt =
     body.method === 'photo' && body.imageBase64
       ? `Look at the photo of ingredients. Recognize what's there, then propose 3 recipes the user can make. ` +
         `Consider also any text ingredients: ${ingredientList || '(none)'}. ` +
+        categoryHint +
         `Prioritize recipes that use ingredients the user already has. ${RECIPE_JSON_SHAPE} ` +
         `Return JSON: { "recipes": Recipe[] } with exactly 3 recipes ordered best-first.`
       : `The user has these ingredients: ${ingredientList || '(none provided)'}. ` +
+        categoryHint +
         `Propose 3 recipes, prioritizing ones that use what they have. ` +
         `Include at least one fully traditional dish if applicable (authenticity_percent 90-100) and one creative option. ` +
         `${RECIPE_JSON_SHAPE} Return JSON: { "recipes": Recipe[] } with exactly 3 recipes ordered best-first.`;

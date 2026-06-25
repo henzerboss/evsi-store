@@ -4,7 +4,24 @@
  * existing gemini routes (nodejs runtime, CORS, X-Client-Token, rate limit).
  */
 
-export const COOKLY_MODEL = 'gemini-2.5-flash-lite';
+/**
+ * Model fallback chain. Each model is tried twice (with a short delay) before moving
+ * to the next; if all attempts fail, the route returns an error the app localizes.
+ * Configurable via env: COOKLY_MODELS="gemini-2.5-flash-lite,gemini-3.1-flash-lite".
+ */
+export const COOKLY_MODELS: string[] = (process.env.COOKLY_MODELS ?? 'gemini-2.5-flash-lite,gemini-3.1-flash-lite')
+  .split(',')
+  .map((m) => m.trim())
+  .filter(Boolean); 
+
+export const COOKLY_MODEL = COOKLY_MODELS[0];
+
+// Generation tuning — all overridable from the server .env.
+const TEMPERATURE = parseFloat(process.env.COOKLY_TEMPERATURE ?? '0.7');
+const MAX_OUTPUT_TOKENS = parseInt(process.env.COOKLY_MAX_OUTPUT_TOKENS ?? '4096', 10);
+const THINKING_BUDGET = parseInt(process.env.COOKLY_THINKING_BUDGET ?? '0', 10);
+const ATTEMPTS_PER_MODEL = 2;
+const RETRY_DELAY_MS = 100;
 
 export function cors(origin: string) {
   return {
@@ -81,11 +98,54 @@ Each recipe object MUST have exactly:
   "servings": number,
   "ingredients": [{ "name": string, "amount": string, "have": boolean }],
   "steps": [{ "text": string, "timer_seconds": number | null }],
-  "nutrition": { "calories": number, "protein": number, "carbs": number, "fat": number }
+  "nutrition": { "calories": number, "protein": number, "carbs": number, "fat": number },
+  "categories": string[]
 }
-Set "have": true for ingredients that are in the user's provided list, false otherwise.`;
+Set "have": true for ingredients that are in the user's provided list, false otherwise.
+For "categories": pick the most fitting from the provided known-categories list when given; you may also add one short new category if none fit. Keep 1-3 categories.`;
 
 type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function callModelOnce(
+  model: string,
+  apiKey: string,
+  systemInstruction: string,
+  parts: GeminiPart[]
+): Promise<{ ok: true; text: string } | { ok: false; status: number; error: string }> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  // Build generationConfig from env. thinkingConfig is only sent when a budget is set
+  // (and is silently ignored by models that don't support it).
+  const generationConfig: Record<string, unknown> = {
+    temperature: TEMPERATURE,
+    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    responseMimeType: 'application/json',
+  };
+  if (THINKING_BUDGET > 0) {
+    generationConfig.thinkingConfig = { thinkingBudget: THINKING_BUDGET };
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemInstruction }] },
+      contents: [{ role: 'user', parts }],
+      generationConfig,
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    return { ok: false, status: res.status, error: detail || `Gemini ${res.status}` };
+  }
+  const json: { candidates?: { content?: { parts?: { text?: string }[] } }[] } = await res.json();
+  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  if (!text) return { ok: false, status: 502, error: 'empty_response' };
+  return { ok: true, text };
+}
 
 export async function callGemini(systemInstruction: string, userPrompt: string, imageBase64?: string) {
   const apiKey = process.env.RECIPE_GEMINI_API_KEY;
@@ -98,27 +158,24 @@ export async function callGemini(systemInstruction: string, userPrompt: string, 
     parts.push({ inlineData: { mimeType: 'image/jpeg', data: imageBase64 } });
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${COOKLY_MODEL}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemInstruction }] },
-      contents: [{ role: 'user', parts }],
-      generationConfig: { temperature: 0.7, responseMimeType: 'application/json' },
-    }),
-  });
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    return { ok: false as const, status: res.status, error: detail || 'Gemini error' };
+  // Try each model ATTEMPTS_PER_MODEL times, RETRY_DELAY_MS apart, before falling
+  // through to the next model. Total attempts = models.length * ATTEMPTS_PER_MODEL
+  // (e.g. 2 models × 2 = 4 attempts), per the product spec.
+  let lastError = 'unavailable';
+  for (const model of COOKLY_MODELS) {
+    for (let attempt = 0; attempt < ATTEMPTS_PER_MODEL; attempt++) {
+      try {
+        const r = await callModelOnce(model, apiKey, systemInstruction, parts);
+        if (r.ok) return { ok: true as const, text: r.text };
+        lastError = r.error;
+      } catch (e) {
+        lastError = String(e);
+      }
+      await sleep(RETRY_DELAY_MS);
+    }
   }
-
-  const json: {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  } = await res.json();
-  const text: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  return { ok: true as const, text };
+  // All attempts exhausted — signal a specific code the app maps to a localized message.
+  return { ok: false as const, status: 503, error: 'all_models_failed', detail: lastError };
 }
 
 export function safeJsonParse<T>(text: string, fallback: T): T {
