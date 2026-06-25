@@ -441,10 +441,10 @@ export async function POST(req: Request) {
   }
   // --- КОНЕЦ ПРОВЕРКИ ---
 
-  const apiKey = process.env.RECIPE_GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'RECIPE_GEMINI_API_KEY missing' }), {
+    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY missing' }), {
       status: 500,
       headers: { ...headers, 'Content-Type': 'application/json' },
     });
