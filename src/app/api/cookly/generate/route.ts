@@ -56,18 +56,29 @@ export async function POST(req: Request) {
     (known.length ? `Known categories to choose from: ${known.join(', ')}. ` : '') +
     (wanted.length ? `The user wants to cook something in these categories: ${wanted.join(', ')} — strongly prefer recipes that fit them. ` : '');
 
+  // Shared quality bar applied to both photo and text/pantry generation.
+  const qualityRules =
+    `Quality rules: (1) Never propose implausible or unappetizing combinations — every recipe ` +
+    `must be something a real cook would actually make and enjoy; if the available ingredients ` +
+    `don't combine well, prefer a simpler classic dish over a weird mashup. ` +
+    `(2) Assume basic staples are always on hand and do NOT count them as "missing": salt, black pepper, water, ` +
+    `and cooking oil. (3) At least ONE recipe must be fully cookable from only the user's ingredients ` +
+    `plus those staples (all its ingredients have "have": true). ` +
+    `(4) At least ONE recipe should be a traditional/canonical dish with the highest authenticity_percent you can ` +
+    `justify (ideally 90-100), not an invented fusion. `;
+
   const userPrompt =
     body.method === 'photo' && body.imageBase64
       ? `Look at the photo of ingredients. Recognize what's there, then propose 3 recipes the user can make. ` +
         `Consider also any text ingredients: ${ingredientList || '(none)'}. ` +
         categoryHint +
-        `Prioritize recipes that use ingredients the user already has. At least ONE recipe MUST be fully cookable from only the recognized/provided ingredients. ${RECIPE_JSON_SHAPE} ` +
+        qualityRules +
+        `${RECIPE_JSON_SHAPE} ` +
         `Return JSON: { "recipes": Recipe[] } with exactly 3 recipes ordered best-first.`
       : `The user has these ingredients: ${ingredientList || '(none provided)'}. ` +
         categoryHint +
         `Propose 3 recipes, prioritizing ones that use what they have. ` +
-        `At least ONE recipe MUST be fully cookable using only the provided ingredients (every ingredient has "have": true). ` +
-        `Include at least one fully traditional dish if applicable (authenticity_percent 90-100) and one creative option. ` +
+        qualityRules +
         `${RECIPE_JSON_SHAPE} Return JSON: { "recipes": Recipe[] } with exactly 3 recipes ordered best-first.`;
 
   const result = await callGemini(system, userPrompt, body.imageBase64);

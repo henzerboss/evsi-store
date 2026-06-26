@@ -5,6 +5,7 @@ export const runtime = 'nodejs';
 interface RecognizeBody {
   locale: string;
   imageBase64: string;
+  mode?: 'photo' | 'receipt';
 }
 
 export async function OPTIONS(req: Request) {
@@ -33,11 +34,19 @@ export async function POST(req: Request) {
   }
 
   const lang = body.locale === 'ru' ? 'Russian' : 'English';
-  const system =
-    `You are a food recognition assistant. Identify edible ingredients/products visible in the image. ` +
-    `Respond in ${lang}. Return STRICT JSON only.`;
-  const prompt =
-    `List the ingredients/products you can see. For each, estimate quantity if visible. ` +
+  const isReceipt = body.mode === 'receipt';
+  const system = isReceipt
+    ? `You are a receipt-parsing assistant. The image is a store/grocery receipt. ` +
+      `Extract only EDIBLE food products (ignore non-food line items, totals, taxes, discounts, store name). ` +
+      `Translate/normalize each product name to a clean, human-readable ${lang} grocery name (e.g. expand abbreviations). ` +
+      `Respond in ${lang}. Return STRICT JSON only.`
+    : `You are a food recognition assistant. Identify edible ingredients/products visible in the image. ` +
+      `Respond in ${lang}. Return STRICT JSON only.`;
+  const prompt = isReceipt
+    ? `Parse the receipt. Return JSON: { "items": [{ "name": string, "confident": boolean, "quantity": number | null, "unit": "pcs"|"g"|"kg"|"ml"|"l"|"pack"|null }] }. ` +
+      `Use quantity/unit from the receipt line when present (e.g. "2" for 2 pcs, weight in kg/g). Set null when unknown. ` +
+      `Do NOT guess expiry dates. Skip anything that isn't food. Names must be in ${lang}.`
+    : `List the ingredients/products you can see. For each, estimate quantity if visible. ` +
     `Return JSON: { "items": [{ "name": string, "confident": boolean, "quantity": number | null, "unit": "pcs"|"g"|"kg"|"ml"|"l"|"pack"|null }] }. ` +
     `Use "confident": false when unsure. Set quantity/unit to null if you cannot tell. ` +
     `Do NOT guess expiry dates. Names must be in ${lang}.`;
