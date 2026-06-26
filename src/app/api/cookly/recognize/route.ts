@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 interface RecognizeBody {
   locale: string;
   imageBase64: string;
-} 
+}
 
 export async function OPTIONS(req: Request) {
   return new Response(null, { status: 204, headers: cors(req.headers.get('origin') ?? '') });
@@ -37,15 +37,16 @@ export async function POST(req: Request) {
     `You are a food recognition assistant. Identify edible ingredients/products visible in the image. ` +
     `Respond in ${lang}. Return STRICT JSON only.`;
   const prompt =
-    `List the ingredients you can see. For each, include a confidence flag. ` +
-    `Return JSON: { "items": [{ "name": string, "confident": boolean }] }. ` +
-    `Use "confident": false when unsure. Names must be in ${lang}.`;
+    `List the ingredients/products you can see. For each, estimate quantity if visible. ` +
+    `Return JSON: { "items": [{ "name": string, "confident": boolean, "quantity": number | null, "unit": "pcs"|"g"|"kg"|"ml"|"l"|"pack"|null }] }. ` +
+    `Use "confident": false when unsure. Set quantity/unit to null if you cannot tell. ` +
+    `Do NOT guess expiry dates. Names must be in ${lang}.`;
 
   const result = await callGemini(system, prompt, body.imageBase64);
   if (!result.ok) {
     return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers });
   }
 
-  const parsed = safeJsonParse<{ items: { name: string; confident: boolean }[] }>(result.text, { items: [] });
+  const parsed = safeJsonParse<{ items: { name: string; confident: boolean; quantity: number | null; unit: string | null }[] }>(result.text, { items: [] });
   return new Response(JSON.stringify(parsed), { status: 200, headers });
 }

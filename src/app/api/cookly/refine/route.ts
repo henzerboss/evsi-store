@@ -20,7 +20,7 @@ interface RefineBody {
 
 export async function OPTIONS(req: Request) {
   return new Response(null, { status: 204, headers: cors(req.headers.get('origin') ?? '') });
-} 
+}
 
 export async function POST(req: Request) {
   const origin = req.headers.get('origin') ?? '';

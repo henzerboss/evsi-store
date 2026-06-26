@@ -1,5 +1,5 @@
 /**
- * Shared helpers for the Cookly AI routes.
+ * Shared helpers for the Dishkin AI routes.
  * Proxies Google Gemini using the recipe-specific key, mirrors the project's
  * existing gemini routes (nodejs runtime, CORS, X-Client-Token, rate limit).
  */
@@ -12,7 +12,7 @@
 export const COOKLY_MODELS: string[] = (process.env.COOKLY_MODELS ?? 'gemini-2.5-flash-lite,gemini-3.1-flash-lite')
   .split(',')
   .map((m) => m.trim())
-  .filter(Boolean); 
+  .filter(Boolean);
 
 export const COOKLY_MODEL = COOKLY_MODELS[0];
 
@@ -66,7 +66,7 @@ const LANG_NAME: Record<string, string> = { en: 'English', ru: 'Russian' };
 export function buildSystemInstruction(locale: string, profile: Profile): string {
   const lang = LANG_NAME[locale] ?? 'English';
   const parts: string[] = [
-    `You are Cookly, a professional culinary assistant.`,
+    `You are Dishkin, a professional culinary assistant.`,
     `Respond ENTIRELY in ${lang}. All recipe titles, ingredients, and steps MUST be in ${lang}.`,
     `Return STRICT JSON only — no markdown, no backticks, no commentary.`,
   ];
