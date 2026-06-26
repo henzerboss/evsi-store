@@ -57,15 +57,18 @@ export async function POST(req: Request) {
     (wanted.length ? `The user wants to cook something in these categories: ${wanted.join(', ')} — strongly prefer recipes that fit them. ` : '');
 
   // Shared quality bar applied to both photo and text/pantry generation.
+  const availableList = ingredientList || '(none provided)';
   const qualityRules =
-    `Quality rules: (1) Never propose implausible or unappetizing combinations — every recipe ` +
-    `must be something a real cook would actually make and enjoy; if the available ingredients ` +
-    `don't combine well, prefer a simpler classic dish over a weird mashup. ` +
-    `(2) Assume basic staples are always on hand and do NOT count them as "missing": salt, black pepper, water, ` +
-    `and cooking oil. (3) At least ONE recipe must be fully cookable from only the user's ingredients ` +
-    `plus those staples (all its ingredients have "have": true). ` +
-    `(4) At least ONE recipe should be a traditional/canonical dish with the highest authenticity_percent you can ` +
-    `justify (ideally 90-100), not an invented fusion. `;
+    `HARD REQUIREMENT — read carefully: The user's available ingredients are: ${availableList}. ` +
+    `Treat salt, black pepper, water and cooking oil as always available too. ` +
+    `The FIRST recipe in your list MUST be fully cookable RIGHT NOW using only those available ` +
+    `ingredients (every one of its "ingredients" must have "have": true and require nothing else). ` +
+    `Make it a real, appetizing dish — if the available items are limited, pick the best simple classic ` +
+    `that genuinely works with them (e.g. an omelette, a simple pasta, a salad), never an implausible mashup. ` +
+    `Then propose 2 more recipes that may need a few extra items (mark those "have": false). ` +
+    `Additional rules: never suggest unappetizing or absurd combinations; include at least one ` +
+    `traditional/canonical dish with a high authenticity_percent (ideally 90-100). ` +
+    `Set "have": true ONLY for ingredients in the available list (or the four staples), "have": false otherwise. `;
 
   const userPrompt =
     body.method === 'photo' && body.imageBase64
