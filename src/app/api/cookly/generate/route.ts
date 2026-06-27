@@ -68,7 +68,11 @@ export async function POST(req: Request) {
     `Then propose 2 more recipes that may need a few extra items (mark those "have": false). ` +
     `Additional rules: never suggest unappetizing or absurd combinations; include at least one ` +
     `traditional/canonical dish with a high authenticity_percent (ideally 90-100). ` +
-    `Set "have": true ONLY for ingredients in the available list (or the four staples), "have": false otherwise. `;
+    `Set "have": true ONLY for ingredients in the available list (or the four staples), "have": false otherwise. ` +
+    `Quantity tolerance: if the user has a quantity of an ingredient, you may design a recipe that uses up to ~20% ` +
+    `MORE than they have and still treat it as available ("have": true) — e.g. if they have 75 g cheese, a recipe ` +
+    `calling for 80-90 g is fine. Only mark an ingredient as "have": false when the recipe truly needs substantially ` +
+    `more than is on hand, or the ingredient is absent entirely. `;
 
   const userPrompt =
     body.method === 'photo' && body.imageBase64
