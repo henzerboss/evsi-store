@@ -60,15 +60,19 @@ export async function POST(req: Request) {
   const availableList = ingredientList || '(none provided)';
   const qualityRules =
     `HARD REQUIREMENT — read carefully: The user's available ingredients are: ${availableList}. ` +
-    `Treat salt, black pepper, water and cooking oil as always available too. ` +
-    `The FIRST recipe in your list MUST be fully cookable RIGHT NOW using only those available ` +
-    `ingredients (every one of its "ingredients" must have "have": true and require nothing else). ` +
+    `You may also assume ONLY these trivial seasonings are on hand: salt, black pepper, water. ` +
+    `Do NOT assume anything else is available — in particular do NOT assume sugar, butter, flour, milk, ` +
+    `eggs, or any cooking oil unless that exact item appears in the available list. Note that "vegetable oil" ` +
+    `is NOT the same as "butter", and having one does not mean the other is available. ` +
+    `The FIRST recipe in your list MUST be fully cookable RIGHT NOW using only the available ` +
+    `ingredients plus those three seasonings (every one of its "ingredients" must have "have": true). ` +
     `Make it a real, appetizing dish — if the available items are limited, pick the best simple classic ` +
     `that genuinely works with them (e.g. an omelette, a simple pasta, a salad), never an implausible mashup. ` +
     `Then propose 2 more recipes that may need a few extra items (mark those "have": false). ` +
     `Additional rules: never suggest unappetizing or absurd combinations; include at least one ` +
     `traditional/canonical dish with a high authenticity_percent (ideally 90-100). ` +
-    `Set "have": true ONLY for ingredients in the available list (or the four staples), "have": false otherwise. ` +
+    `CRITICAL: set "have": true ONLY for an ingredient whose name clearly matches an item in the available ` +
+    `list (or is salt/black pepper/water). For every other ingredient set "have": false. When unsure, use false. ` +
     `Quantity tolerance: if the user has a quantity of an ingredient, you may design a recipe that uses up to ~20% ` +
     `MORE than they have and still treat it as available ("have": true) — e.g. if they have 75 g cheese, a recipe ` +
     `calling for 80-90 g is fine. Only mark an ingredient as "have": false when the recipe truly needs substantially ` +

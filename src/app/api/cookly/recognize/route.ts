@@ -1,4 +1,4 @@
-import { cors, checkRateLimit, callGemini, safeJsonParse } from '../_shared';
+import { cors, checkRateLimit, callGemini, safeJsonParse, LANG_NAME } from '../_shared';
 
 export const runtime = 'nodejs';
 
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: 'bad_request' }), { status: 400, headers });
   }
 
-  const lang = body.locale === 'ru' ? 'Russian' : 'English';
+  const lang = LANG_NAME[body.locale] ?? 'English';
   const isReceipt = body.mode === 'receipt';
   const system = isReceipt
     ? `You are a receipt-parsing assistant. The image is a store/grocery receipt. ` +

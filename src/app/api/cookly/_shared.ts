@@ -60,7 +60,13 @@ export interface Profile {
   location?: string;
 }
 
-const LANG_NAME: Record<string, string> = { en: 'English', ru: 'Russian' };
+export const LANG_NAME: Record<string, string> = {
+  en: 'English', ru: 'Russian', es: 'Spanish', de: 'German', fr: 'French', it: 'Italian',
+  pt: 'Portuguese', nl: 'Dutch', pl: 'Polish', tr: 'Turkish', uk: 'Ukrainian', cs: 'Czech',
+  sk: 'Slovak', ro: 'Romanian', hu: 'Hungarian', el: 'Greek', sv: 'Swedish', da: 'Danish',
+  fi: 'Finnish', nb: 'Norwegian', ar: 'Arabic', he: 'Hebrew', hi: 'Hindi', th: 'Thai',
+  id: 'Indonesian', ja: 'Japanese', ko: 'Korean', zh: 'Chinese',
+};
 
 /** Builds the system instruction enforcing locale, preferences, and JSON-only output. */
 export function buildSystemInstruction(locale: string, profile: Profile): string {
