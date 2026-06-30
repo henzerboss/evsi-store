@@ -63,8 +63,10 @@ export async function POST(req: Request) {
   // Optional explicit dish the user typed on the "what are we cooking" step.
   const dish = (body.dishName ?? '').trim();
   const dishHint = dish
-    ? `The user specifically wants to make "${dish}". The FIRST recipe MUST be a version of "${dish}" ` +
-      `(adapt it to their ingredients if needed and reflect that in authenticity_percent). The other recipes may be related alternatives. `
+    ? `The user specifically wants to make "${dish}". ALL 3 recipes MUST be variations of "${dish}" ` +
+      `(e.g. classic, a quick/simple take, and a creative or regional twist) — do NOT propose unrelated dishes. ` +
+      `At least ONE recipe MUST be the TRADITIONAL/canonical "${dish}" with a high authenticity_percent (ideally 90-100). ` +
+      `Adapt each to the user's ingredients where needed and reflect that in authenticity_percent. `
     : '';
 
   // Whether the user will buy missing items changes how strict the "cookable now" rule is.
