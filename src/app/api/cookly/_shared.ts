@@ -82,6 +82,8 @@ export function buildSystemInstruction(locale: string, profile: Profile): string
   if (profile.appliances?.length)
     parts.push(`The user only has these appliances; do not require others: ${profile.appliances.join(', ')}.`);
   if (profile.cuisines?.length) parts.push(`Prefer these cuisines when natural: ${profile.cuisines.join(', ')}.`);
+  if (profile.likes?.length) parts.push(`The user especially enjoys these foods; favor them when they fit: ${profile.likes.join(', ')}.`);
+  if (profile.location) parts.push(`The user is in ${profile.location}; lean on seasonal and regionally available ingredients.`);
   if (profile.skill) parts.push(`Match step detail to a ${profile.skill} cook.`);
   if (profile.servings) parts.push(`Default to ${profile.servings} servings unless specified.`);
   return parts.join(' ');

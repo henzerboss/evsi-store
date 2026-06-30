@@ -18,6 +18,10 @@ interface GenerateBody {
   imageBase64?: string;
   requestedCategories?: string[];
   knownCategories?: string[];
+  /** Optional dish the user explicitly wants — at least the first recipe should target it. */
+  dishName?: string;
+  /** User is willing to buy missing ingredients — relaxes the "cookable right now" constraint. */
+  willBuyMissing?: boolean;
   profile: Profile;
 }
 
@@ -56,6 +60,16 @@ export async function POST(req: Request) {
     (known.length ? `Known categories to choose from: ${known.join(', ')}. ` : '') +
     (wanted.length ? `The user wants to cook something in these categories: ${wanted.join(', ')} — strongly prefer recipes that fit them. ` : '');
 
+  // Optional explicit dish the user typed on the "what are we cooking" step.
+  const dish = (body.dishName ?? '').trim();
+  const dishHint = dish
+    ? `The user specifically wants to make "${dish}". The FIRST recipe MUST be a version of "${dish}" ` +
+      `(adapt it to their ingredients if needed and reflect that in authenticity_percent). The other recipes may be related alternatives. `
+    : '';
+
+  // Whether the user will buy missing items changes how strict the "cookable now" rule is.
+  const willBuy = !!body.willBuyMissing;
+
   // Shared quality bar applied to both photo and text/pantry generation.
   const availableList = ingredientList || '(none provided)';
   const qualityRules =
@@ -64,8 +78,9 @@ export async function POST(req: Request) {
     `Do NOT assume anything else is available — in particular do NOT assume sugar, butter, flour, milk, ` +
     `eggs, or any cooking oil unless that exact item appears in the available list. Note that "vegetable oil" ` +
     `is NOT the same as "butter", and having one does not mean the other is available. ` +
-    `The FIRST recipe in your list MUST be fully cookable RIGHT NOW using only the available ` +
-    `ingredients plus those three seasonings (every one of its "ingredients" must have "have": true). ` +
+    (willBuy
+      ? `The user is willing to BUY a few missing ingredients, so recipes may include items not on hand (mark those "have": false). Still prioritize using what they already have and keep the shopping list short. `
+      : `The FIRST recipe in your list MUST be fully cookable RIGHT NOW using only the available ingredients plus those three seasonings (every one of its "ingredients" must have "have": true). `) +
     `Make it a real, appetizing dish — if the available items are limited, pick the best simple classic ` +
     `that genuinely works with them (e.g. an omelette, a simple pasta, a salad), never an implausible mashup. ` +
     `Then propose 2 more recipes that may need a few extra items (mark those "have": false). ` +
@@ -82,12 +97,12 @@ export async function POST(req: Request) {
     body.method === 'photo' && body.imageBase64
       ? `Look at the photo of ingredients. Recognize what's there, then propose 3 recipes the user can make. ` +
         `Consider also any text ingredients: ${ingredientList || '(none)'}. ` +
-        categoryHint +
+        categoryHint + dishHint +
         qualityRules +
         `${RECIPE_JSON_SHAPE} ` +
         `Return JSON: { "recipes": Recipe[] } with exactly 3 recipes ordered best-first.`
       : `The user has these ingredients: ${ingredientList || '(none provided)'}. ` +
-        categoryHint +
+        categoryHint + dishHint +
         `Propose 3 recipes, prioritizing ones that use what they have. ` +
         qualityRules +
         `${RECIPE_JSON_SHAPE} Return JSON: { "recipes": Recipe[] } with exactly 3 recipes ordered best-first.`;
