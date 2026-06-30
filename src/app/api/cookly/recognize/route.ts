@@ -6,6 +6,8 @@ interface RecognizeBody {
   locale: string;
   imageBase64: string;
   mode?: 'photo' | 'receipt';
+  /** Current pantry items (name + unit), so the AI reuses existing names/units for matches. */
+  pantryItems?: { name: string; unit?: string | null }[];
 }
 
 export async function OPTIONS(req: Request) {
@@ -35,13 +37,22 @@ export async function POST(req: Request) {
 
   const lang = LANG_NAME[body.locale] ?? 'English';
   const isReceipt = body.mode === 'receipt';
-  const system = isReceipt
+
+  // Tell the model about the user's existing pantry so a recognized item that's the same product
+  // is named identically (e.g. keep "черешня", don't switch to "вишня") and reuses the same unit.
+  const pantry = (body.pantryItems ?? []).filter((p) => p && p.name).slice(0, 100);
+  const pantryHint = pantry.length
+    ? ` The user's current pantry (JSON) is: ${JSON.stringify(pantry)}. ` +
+      `If a recognized product is the SAME as one already in this list, use the EXACT same name and the same unit as in the list. Only introduce a new name when it's genuinely a different product.`
+    : '';
+
+  const system = (isReceipt
     ? `You are a receipt-parsing assistant. The image is a store/grocery receipt. ` +
       `Extract only EDIBLE food products (ignore non-food line items, totals, taxes, discounts, store name). ` +
       `Translate/normalize each product name to a clean, human-readable ${lang} grocery name (e.g. expand abbreviations). ` +
       `Respond in ${lang}. Return STRICT JSON only.`
     : `You are a food recognition assistant. Identify edible ingredients/products visible in the image. ` +
-      `Respond in ${lang}. Return STRICT JSON only.`;
+      `Respond in ${lang}. Return STRICT JSON only.`) + pantryHint;
   const prompt = isReceipt
     ? `Parse the receipt. Return JSON: { "items": [{ "name": string, "confident": boolean, "quantity": number | null, "unit": "pcs"|"g"|"kg"|"ml"|"l"|"pack"|null }] }. ` +
       `Use quantity/unit from the receipt line when present (e.g. "2" for 2 pcs, weight in kg/g). Set null when unknown. ` +

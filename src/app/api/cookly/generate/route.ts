@@ -91,7 +91,8 @@ export async function POST(req: Request) {
     `Quantity tolerance: if the user has a quantity of an ingredient, you may design a recipe that uses up to ~20% ` +
     `MORE than they have and still treat it as available ("have": true) — e.g. if they have 75 g cheese, a recipe ` +
     `calling for 80-90 g is fine. Only mark an ingredient as "have": false when the recipe truly needs substantially ` +
-    `more than is on hand, or the ingredient is absent entirely. `;
+    `more than is on hand, or the ingredient is absent entirely. ` +
+    `NAMING: when a recipe ingredient is one the user already has, use the user\u2019s EXACT product name as written in the available list (e.g. if they have \"черешня\", call it \"черешня\" \u2014 do NOT rename it to \"вишня\" or add qualifiers like \"frozen\"/\"fresh\"). This applies to NAMES only \u2014 still use natural cooking measurements for amounts (tbsp, tsp, clove, pinch, etc.), NOT the user\u2019s storage units. `;
 
   const userPrompt =
     body.method === 'photo' && body.imageBase64
