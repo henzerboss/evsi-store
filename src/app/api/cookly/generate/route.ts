@@ -2,6 +2,7 @@ import {
   cors,
   checkRateLimit,
   buildSystemInstruction,
+  buildEquipmentGuidance,
   RECIPE_JSON_SHAPE,
   callGemini,
   safeJsonParse,
@@ -52,6 +53,7 @@ export async function POST(req: Request) {
   }
 
   const system = buildSystemInstruction(body.locale, body.profile ?? {});
+  const equipmentGuidance = buildEquipmentGuidance(body.profile ?? {});
 
   const ingredientList = (body.ingredients ?? []).filter(Boolean).join(', ');
   const known = (body.knownCategories ?? []).filter(Boolean);
@@ -113,12 +115,14 @@ export async function POST(req: Request) {
       ? `Look at the photo of ingredients. Recognize what's there, then propose 3 recipes the user can make. ` +
         `Consider also any text ingredients: ${ingredientList || '(none)'}. ` +
         categoryHint + dishHint +
+        equipmentGuidance +
         qualityRules +
         imagePromptRules +
         `${RECIPE_JSON_SHAPE} ` +
         `Return JSON: { "recipes": Recipe[] } with exactly 3 recipes ordered best-first.`
       : `The user has these ingredients: ${ingredientList || '(none provided)'}. ` +
         categoryHint + dishHint +
+        equipmentGuidance +
         `Propose 3 recipes, prioritizing ones that use what they have. ` +
         qualityRules +
         imagePromptRules +

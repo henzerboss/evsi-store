@@ -2,6 +2,7 @@ import {
   cors,
   checkRateLimit,
   buildSystemInstruction,
+  buildEquipmentGuidance,
   RECIPE_JSON_SHAPE,
   callGemini,
   safeJsonParse,
@@ -44,10 +45,12 @@ export async function POST(req: Request) {
   }
 
   const system = buildSystemInstruction(body.locale, body.profile ?? {});
+  const equipmentGuidance = buildEquipmentGuidance(body.profile ?? {});
   const userPrompt =
     `Here is an existing recipe as JSON:\n${JSON.stringify(body.recipe)}\n\n` +
     `Apply this change requested by the user: "${body.instruction}". ` +
     `Re-evaluate authenticity_percent after the change. ` +
+    equipmentGuidance +
     `${RECIPE_JSON_SHAPE} Return JSON: { "recipe": Recipe }.`;
 
   const result = await callGemini(system, userPrompt);

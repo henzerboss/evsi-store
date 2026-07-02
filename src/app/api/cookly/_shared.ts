@@ -68,6 +68,26 @@ export const LANG_NAME: Record<string, string> = {
   id: 'Indonesian', ja: 'Japanese', ko: 'Korean', zh: 'Chinese',
 };
 
+
+/**
+ * Equipment is a strong preference, but not an allergy-level hard ban: users may add
+ * localized/custom appliance names, and some recipes have unavoidable traditional tools.
+ * This guidance keeps Gemini biased toward available equipment without making prompts brittle.
+ */
+export function buildEquipmentGuidance(profile: Profile): string {
+  const appliances = (profile.appliances ?? []).map((a) => a.trim()).filter(Boolean);
+  if (!appliances.length) return '';
+
+  return [
+    `EQUIPMENT GUIDANCE — important but not allergy-level strict: the user says they have these cooking appliances/equipment: ${appliances.join(', ')}.`,
+    `Prefer recipes and cooking methods that can be made with this equipment.`,
+    `Do not casually introduce appliances that are not listed (for example oven, stovetop, microwave, blender, food processor, grill, air fryer, multicooker, steamer, pressure cooker, mixer) if a listed appliance or a simple hand method can work instead.`,
+    `You may assume basic hand tools only: knife, cutting board, bowl, spoon, fork, measuring spoon/cup, plate.`,
+    `If a traditional/canonical version usually uses unavailable equipment, adapt the cooking method to the available equipment when reasonable and reflect the adaptation in authenticity_percent.`,
+    `Every cooking step should be practical with the available equipment or clearly offer a compatible alternative.`,
+  ].join(' ') + ' ';
+}
+
 /** Builds the system instruction enforcing locale, preferences, and JSON-only output. */
 export function buildSystemInstruction(locale: string, profile: Profile): string {
   const lang = LANG_NAME[locale] ?? 'English';
@@ -81,7 +101,7 @@ export function buildSystemInstruction(locale: string, profile: Profile): string
     parts.push(`NEVER include these allergens or anything containing them: ${profile.allergies.join(', ')}.`);
   if (profile.dislikes?.length) parts.push(`Avoid these disliked foods: ${profile.dislikes.join(', ')}.`);
   if (profile.appliances?.length)
-    parts.push(`The user only has these appliances; do not require others: ${profile.appliances.join(', ')}.`);
+    parts.push(`The user's available cooking appliances/equipment are: ${profile.appliances.join(', ')}. Prefer recipes and cooking steps that fit this equipment, and avoid depending on unlisted appliances when a reasonable adaptation is possible.`);
   if (profile.cuisines?.length) parts.push(`Prefer these cuisines when natural: ${profile.cuisines.join(', ')}.`);
   if (profile.likes?.length) parts.push(`The user especially enjoys these foods; favor them when they fit: ${profile.likes.join(', ')}.`);
   if (profile.location) parts.push(`The user is in ${profile.location}; lean on seasonal and regionally available ingredients.`);
