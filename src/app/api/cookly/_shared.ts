@@ -75,7 +75,7 @@ export function buildSystemInstruction(locale: string, profile: Profile): string
     `You are Dishkin, a professional culinary assistant.`,
     `Respond ENTIRELY in ${lang}. All recipe titles, ingredients, and steps MUST be in ${lang}.`,
     `Return STRICT JSON only — no markdown, no backticks, no commentary.`,
-    `When returning image_prompt_en, write it in clear natural English optimized for food image generation.`,
+    `When returning image_prompt_en, write it in English as the final ready-to-use prompt for a food image generation model.`,
   ];
   if (profile.allergies?.length)
     parts.push(`NEVER include these allergens or anything containing them: ${profile.allergies.join(', ')}.`);
@@ -102,7 +102,7 @@ Each recipe object MUST have exactly:
   "authenticity_percent": number (0-100; 100 = fully traditional/canonical, lower = adapted or invented),
   "cuisine": string,
   "description": string,
-  "image_prompt_en": string,
+  "image_prompt_en": string (English, final ready-to-use image generation prompt),
   "time_minutes": number,
   "difficulty": "easy" | "medium" | "hard",
   "servings": number,
@@ -112,7 +112,17 @@ Each recipe object MUST have exactly:
   "categories": string[]
 }
 Set "have": true for ingredients that are in the user's provided list, false otherwise.
-For "categories": pick the most fitting from the provided known-categories list when given; you may also add one short new category if none fit. Keep 1-3 categories.`;
+For "categories": pick the most fitting from the provided known-categories list when given; you may also add one short new category if none fit. Keep 1-3 categories.
+
+image_prompt_en requirements:
+- Write in English only.
+- It will be sent directly to the image generation model with no extra recipe context.
+- Include the exact dish name, dish type, key visible ingredients, a very short summary of the cooking/result, and a clear visual description of the final plated dish.
+- Mention culturally accurate shape, texture, color, garnish, serving dish, and plating when relevant.
+- If the recipe is soup/stew/curry/broth-based, explicitly say it is served in a bowl.
+- If the recipe is dumplings/vareniki/pierogi/pelmeni/gnocchi, explicitly describe the correct shape and preparation style.
+- Add negative constraints for common confusions: do not show pasta/noodles/rice/burgers/pizza/sushi/baked buns/pastries unless they are truly part of the recipe.
+- Always include: no text, no labels, no people, no hands, no packaging, no watermark, photorealistic food photography.`;
 
 type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
 

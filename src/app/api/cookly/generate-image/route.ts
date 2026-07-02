@@ -3,42 +3,14 @@ import { cors, checkRateLimit } from '../_shared';
 
 export const runtime = 'nodejs';
 
-const MAX_RECIPE_TEXT_CHARS = 8_000;
 const REQUEST_TIMEOUT_MS = 45_000;
 
 const payloadSchema = z.object({
-  locale: z.string().min(2).max(8).optional().nullable(),
-  title: z.string().min(1).max(200).optional().nullable(),
-  cuisine: z.string().min(1).max(120).optional().nullable(),
-  description: z.string().min(1).max(1000).optional().nullable(),
-  imagePrompt: z.string().min(10).max(1000).optional().nullable(),
-  servings: z.number().int().min(1).max(100).optional().nullable(),
-  recipeText: z.string().min(10).max(MAX_RECIPE_TEXT_CHARS).optional().nullable(),
+  imagePrompt: z.string().min(20).max(1800),
 });
 
 function json(data: unknown, status: number, headers: Record<string, string>) {
   return new Response(JSON.stringify(data), { status, headers });
-}
-
-function buildImagePrompt(payload: z.infer<typeof payloadSchema>) {
-  const lines = [
-    'Create a photorealistic food image of the final finished dish only.',
-    payload.imagePrompt?.trim() ? `Primary visual brief: ${payload.imagePrompt.trim()}` : '',
-    payload.title?.trim() ? `Dish title: ${payload.title.trim()}.` : '',
-    payload.cuisine?.trim() ? `Cuisine: ${payload.cuisine.trim()}.` : '',
-    payload.description?.trim() ? `Short description: ${payload.description.trim()}.` : '',
-    payload.servings ? `Servings: ${payload.servings}.` : '',
-    'Important: depict exactly the same dish described above, not a generic food image.',
-    'Show only the plated final dish, ready to eat. Use natural restaurant-style food photography, realistic textures, appetizing lighting, and accurate ingredients.',
-    'If the dish is a soup, stew, curry, or broth-based dish, clearly show it served in a bowl.',
-    'Do not show pasta, noodles, spaghetti, rice, burgers, pizza, sushi, sandwiches, or any unrelated dish unless they are explicitly part of the described dish.',
-    'No people, no hands, no cutlery holding the food, no packaging, no labels, no text, no watermark, no cartoon style.',
-    payload.recipeText?.trim()
-      ? `Fallback recipe context (use only to clarify ingredients if needed):\n${payload.recipeText.trim()}`
-      : '',
-  ];
-
-  return lines.filter(Boolean).join('\n\n');
 }
 
 export async function OPTIONS(req: Request) {
@@ -74,7 +46,7 @@ export async function POST(req: Request) {
   const model = process.env.DEEPINFRA_IMAGE_MODEL?.trim() || 'black-forest-labs/FLUX-1-schnell';
   const size = process.env.DEEPINFRA_IMAGE_SIZE?.trim() || '512x512';
   const steps = Number.parseInt(process.env.DEEPINFRA_IMAGE_STEPS ?? '4', 10);
-  const prompt = buildImagePrompt(payload);
+  const prompt = payload.imagePrompt.trim();
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);

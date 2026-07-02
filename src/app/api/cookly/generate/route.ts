@@ -96,18 +96,32 @@ export async function POST(req: Request) {
     `more than is on hand, or the ingredient is absent entirely. ` +
     `NAMING: when a recipe ingredient is one the user already has, use the user\u2019s EXACT product name as written in the available list (e.g. if they have \"черешня\", call it \"черешня\" \u2014 do NOT rename it to \"вишня\" or add qualifiers like \"frozen\"/\"fresh\"). This applies to NAMES only \u2014 still use natural cooking measurements for amounts (tbsp, tsp, clove, pinch, etc.), NOT the user\u2019s storage units. `;
 
+
+  const imagePromptRules =
+    `IMAGE PROMPT: For every recipe, image_prompt_en MUST be a complete English prompt that will be sent directly to an image generation model. ` +
+    `It must include the exact dish name, dish type, key visible ingredients, a short summary of the final result/cooking method, and a concrete visual description of the plated finished dish. ` +
+    `Mention culturally accurate shape, texture, color, garnish, serving dish and plating when relevant. ` +
+    `For soups/stews/curries/broths, explicitly say it is served in a bowl. ` +
+    `For dumplings/vareniki/pierogi/pelmeni/gnocchi, explicitly describe the correct shape and preparation style. ` +
+    `For Ukrainian/Russian vareniki: describe boiled Eastern European crescent-shaped half-moon dumplings with pale soft dough, served with sour cream, dill and optionally caramelized onions; do NOT describe baked buns, bread rolls, pastries, khinkali, bao buns, ravioli, pasta or noodles. ` +
+    `For lazy vareniki: describe small irregular boiled dumpling pieces / gnocchi-like pieces, not closed stuffed dumplings. ` +
+    `If pasta, noodles, rice, burgers, pizza, sushi or other unrelated foods are not part of the recipe, explicitly say they must not appear. ` +
+    `Always include: photorealistic food photography, natural appetizing light, no text, no labels, no people, no hands, no packaging, no watermark. `;
+
   const userPrompt =
     body.method === 'photo' && body.imageBase64
       ? `Look at the photo of ingredients. Recognize what's there, then propose 3 recipes the user can make. ` +
         `Consider also any text ingredients: ${ingredientList || '(none)'}. ` +
         categoryHint + dishHint +
         qualityRules +
+        imagePromptRules +
         `${RECIPE_JSON_SHAPE} ` +
         `Return JSON: { "recipes": Recipe[] } with exactly 3 recipes ordered best-first.`
       : `The user has these ingredients: ${ingredientList || '(none provided)'}. ` +
         categoryHint + dishHint +
         `Propose 3 recipes, prioritizing ones that use what they have. ` +
         qualityRules +
+        imagePromptRules +
         `${RECIPE_JSON_SHAPE} Return JSON: { "recipes": Recipe[] } with exactly 3 recipes ordered best-first.`;
 
   const result = await callGemini(system, userPrompt, body.imageBase64);
