@@ -8,23 +8,37 @@ const REQUEST_TIMEOUT_MS = 45_000;
 
 const payloadSchema = z.object({
   locale: z.string().min(2).max(8).optional().nullable(),
+  title: z.string().min(1).max(200).optional().nullable(),
+  cuisine: z.string().min(1).max(120).optional().nullable(),
+  description: z.string().min(1).max(1000).optional().nullable(),
+  imagePrompt: z.string().min(10).max(1000).optional().nullable(),
   servings: z.number().int().min(1).max(100).optional().nullable(),
-  recipeText: z.string().min(10).max(MAX_RECIPE_TEXT_CHARS),
+  recipeText: z.string().min(10).max(MAX_RECIPE_TEXT_CHARS).optional().nullable(),
 });
 
 function json(data: unknown, status: number, headers: Record<string, string>) {
   return new Response(JSON.stringify(data), { status, headers });
 }
 
-function buildImagePrompt(recipeText: string, servings?: number | null) {
-  return [
-    'Photorealistic food photography of the final cooked dish produced by this recipe.',
-    'Show only the finished plated dish, ready to eat, based on the ingredients, cooking steps and number of servings.',
-    servings ? `Number of servings: ${servings}.` : '',
-    'Use natural appetizing restaurant-style lighting, realistic textures, true-to-recipe ingredients, no people, no hands, no text, no labels, no watermark, no packaging, no cartoon style.',
-    'Recipe text:',
-    recipeText,
-  ].filter(Boolean).join('\n\n');
+function buildImagePrompt(payload: z.infer<typeof payloadSchema>) {
+  const lines = [
+    'Create a photorealistic food image of the final finished dish only.',
+    payload.imagePrompt?.trim() ? `Primary visual brief: ${payload.imagePrompt.trim()}` : '',
+    payload.title?.trim() ? `Dish title: ${payload.title.trim()}.` : '',
+    payload.cuisine?.trim() ? `Cuisine: ${payload.cuisine.trim()}.` : '',
+    payload.description?.trim() ? `Short description: ${payload.description.trim()}.` : '',
+    payload.servings ? `Servings: ${payload.servings}.` : '',
+    'Important: depict exactly the same dish described above, not a generic food image.',
+    'Show only the plated final dish, ready to eat. Use natural restaurant-style food photography, realistic textures, appetizing lighting, and accurate ingredients.',
+    'If the dish is a soup, stew, curry, or broth-based dish, clearly show it served in a bowl.',
+    'Do not show pasta, noodles, spaghetti, rice, burgers, pizza, sushi, sandwiches, or any unrelated dish unless they are explicitly part of the described dish.',
+    'No people, no hands, no cutlery holding the food, no packaging, no labels, no text, no watermark, no cartoon style.',
+    payload.recipeText?.trim()
+      ? `Fallback recipe context (use only to clarify ingredients if needed):\n${payload.recipeText.trim()}`
+      : '',
+  ];
+
+  return lines.filter(Boolean).join('\n\n');
 }
 
 export async function OPTIONS(req: Request) {
@@ -60,8 +74,7 @@ export async function POST(req: Request) {
   const model = process.env.DEEPINFRA_IMAGE_MODEL?.trim() || 'black-forest-labs/FLUX-1-schnell';
   const size = process.env.DEEPINFRA_IMAGE_SIZE?.trim() || '512x512';
   const steps = Number.parseInt(process.env.DEEPINFRA_IMAGE_STEPS ?? '4', 10);
-  const n = 1;
-  const prompt = buildImagePrompt(payload.recipeText, payload.servings);
+  const prompt = buildImagePrompt(payload);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -77,7 +90,7 @@ export async function POST(req: Request) {
         model,
         prompt,
         size,
-        n,
+        n: 1,
         response_format: 'b64_json',
         // DeepInfra exposes FLUX Schnell, which is designed for 1-4 steps. If the
         // OpenAI-compatible endpoint ignores this provider-specific field, the model
@@ -92,7 +105,7 @@ export async function POST(req: Request) {
       return json({ error: 'deepinfra_failed', detail }, 502, headers);
     }
 
-    const body = await res.json() as { data?: { b64_json?: string }[] };
+    const body = (await res.json()) as { data?: { b64_json?: string }[] };
     const imageBase64 = body.data?.[0]?.b64_json;
     if (!imageBase64) {
       return json({ error: 'deepinfra_empty_image' }, 502, headers);

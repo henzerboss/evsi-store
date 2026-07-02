@@ -75,6 +75,7 @@ export function buildSystemInstruction(locale: string, profile: Profile): string
     `You are Dishkin, a professional culinary assistant.`,
     `Respond ENTIRELY in ${lang}. All recipe titles, ingredients, and steps MUST be in ${lang}.`,
     `Return STRICT JSON only — no markdown, no backticks, no commentary.`,
+    `When returning image_prompt_en, write it in clear natural English optimized for food image generation.`,
   ];
   if (profile.allergies?.length)
     parts.push(`NEVER include these allergens or anything containing them: ${profile.allergies.join(', ')}.`);
@@ -101,6 +102,7 @@ Each recipe object MUST have exactly:
   "authenticity_percent": number (0-100; 100 = fully traditional/canonical, lower = adapted or invented),
   "cuisine": string,
   "description": string,
+  "image_prompt_en": string,
   "time_minutes": number,
   "difficulty": "easy" | "medium" | "hard",
   "servings": number,
