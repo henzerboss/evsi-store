@@ -23,6 +23,8 @@ interface GenerateBody {
   dishName?: string;
   /** User is willing to buy missing ingredients — relaxes the "cookable right now" constraint. */
   willBuyMissing?: boolean;
+  /** User intentionally skipped ingredient selection; generate authentic recipes instead of pantry-first ones. */
+  skippedIngredients?: boolean;
   profile: Profile;
 }
 
@@ -54,8 +56,11 @@ export async function POST(req: Request) {
 
   const system = buildSystemInstruction(body.locale, body.profile ?? {});
   const equipmentGuidance = buildEquipmentGuidance(body.profile ?? {});
+  const skippedIngredients = !!body.skippedIngredients;
 
-  const ingredientList = (body.ingredients ?? []).filter(Boolean).join(', ');
+  // When the user pressed "Skip" on the ingredient step, any pantry/fridge list must be ignored.
+  // Skip means: choose authentic/canonical ingredients for the requested dish/category, not pantry-first ideas.
+  const ingredientList = skippedIngredients ? '' : (body.ingredients ?? []).filter(Boolean).join(', ');
   const known = (body.knownCategories ?? []).filter(Boolean);
   const wanted = (body.requestedCategories ?? []).filter(Boolean);
   const categoryHint =
@@ -65,10 +70,15 @@ export async function POST(req: Request) {
   // Optional explicit dish the user typed on the "what are we cooking" step.
   const dish = (body.dishName ?? '').trim();
   const dishHint = dish
-    ? `The user specifically wants to make "${dish}". ALL 3 recipes MUST be variations of "${dish}" ` +
-      `(e.g. classic, a quick/simple take, and a creative or regional twist) — do NOT propose unrelated dishes. ` +
-      `At least ONE recipe MUST be the TRADITIONAL/canonical "${dish}" with a high authenticity_percent (ideally 90-100). ` +
-      `Adapt each to the user's ingredients where needed and reflect that in authenticity_percent. `
+    ? skippedIngredients
+      ? `The user specifically wants to make "${dish}". ALL 3 recipes MUST be variations of "${dish}" ` +
+        `(e.g. classic, a quick/simple take, and a creative or regional twist) — do NOT propose unrelated dishes. ` +
+        `Use authentic/canonical ingredients for "${dish}" instead of optimizing around pantry/fridge items. ` +
+        `At least ONE recipe MUST be the TRADITIONAL/canonical "${dish}" with a high authenticity_percent (ideally 90-100). `
+      : `The user specifically wants to make "${dish}". ALL 3 recipes MUST be variations of "${dish}" ` +
+        `(e.g. classic, a quick/simple take, and a creative or regional twist) — do NOT propose unrelated dishes. ` +
+        `At least ONE recipe MUST be the TRADITIONAL/canonical "${dish}" with a high authenticity_percent (ideally 90-100). ` +
+        `Adapt each to the user's ingredients where needed and reflect that in authenticity_percent. `
     : '';
 
   // Whether the user will buy missing items changes how strict the "cookable now" rule is.
@@ -76,27 +86,38 @@ export async function POST(req: Request) {
 
   // Shared quality bar applied to both photo and text/pantry generation.
   const availableList = ingredientList || '(none provided)';
-  const qualityRules =
-    `HARD REQUIREMENT — read carefully: The user's available ingredients are: ${availableList}. ` +
-    `You may also assume ONLY these trivial seasonings are on hand: salt, black pepper, water. ` +
-    `Do NOT assume anything else is available — in particular do NOT assume sugar, butter, flour, milk, ` +
-    `eggs, or any cooking oil unless that exact item appears in the available list. Note that "vegetable oil" ` +
-    `is NOT the same as "butter", and having one does not mean the other is available. ` +
-    (willBuy
-      ? `The user is willing to BUY a few missing ingredients, so recipes may include items not on hand (mark those "have": false). Still prioritize using what they already have and keep the shopping list short. `
-      : `The FIRST recipe in your list MUST be fully cookable RIGHT NOW using only the available ingredients plus those three seasonings (every one of its "ingredients" must have "have": true). `) +
-    `Make it a real, appetizing dish — if the available items are limited, pick the best simple classic ` +
-    `that genuinely works with them (e.g. an omelette, a simple pasta, a salad), never an implausible mashup. ` +
-    `Then propose 2 more recipes that may need a few extra items (mark those "have": false). ` +
-    `Additional rules: never suggest unappetizing or absurd combinations; include at least one ` +
-    `traditional/canonical dish with a high authenticity_percent (ideally 90-100). ` +
-    `CRITICAL: set "have": true ONLY for an ingredient whose name clearly matches an item in the available ` +
-    `list (or is salt/black pepper/water). For every other ingredient set "have": false. When unsure, use false. ` +
-    `Quantity tolerance: if the user has a quantity of an ingredient, you may design a recipe that uses up to ~20% ` +
-    `MORE than they have and still treat it as available ("have": true) — e.g. if they have 75 g cheese, a recipe ` +
-    `calling for 80-90 g is fine. Only mark an ingredient as "have": false when the recipe truly needs substantially ` +
-    `more than is on hand, or the ingredient is absent entirely. ` +
-    `NAMING: when a recipe ingredient is one the user already has, use the user\u2019s EXACT product name as written in the available list (e.g. if they have \"черешня\", call it \"черешня\" \u2014 do NOT rename it to \"вишня\" or add qualifiers like \"frozen\"/\"fresh\"). This applies to NAMES only \u2014 still use natural cooking measurements for amounts (tbsp, tsp, clove, pinch, etc.), NOT the user\u2019s storage units. `;
+  const qualityRules = skippedIngredients
+    ?
+      `INGREDIENT SELECTION MODE — the user intentionally skipped the ingredient/pantry step. ` +
+      `Do NOT prioritize pantry/fridge items and do NOT try to keep the recipe limited to what is on hand. ` +
+      `Choose ingredients based on authentic, recognizable, classic recipes that fit the requested dish/category/cuisine and the user's profile. ` +
+      `You may assume ONLY these trivial seasonings are on hand: salt, black pepper, water. ` +
+      `For all other ingredients set "have": false, because the user did not provide an available-ingredients list. ` +
+      `Make the recipes useful as shopping/cooking ideas: include all important canonical ingredients, not pantry substitutions. ` +
+      `Include at least one traditional/canonical dish with a high authenticity_percent (ideally 90-100). ` +
+      `If the user selected a category but no dish, propose 3 well-known classic recipes from that category rather than random pantry-based ideas. `
+    :
+      `HARD REQUIREMENT — read carefully: The user's available ingredients are: ${availableList}. ` +
+      `You may also assume ONLY these trivial seasonings are on hand: salt, black pepper, water. ` +
+      `Do NOT assume anything else is available — in particular do NOT assume sugar, butter, flour, milk, ` +
+      `eggs, or any cooking oil unless that exact item appears in the available list. Note that "vegetable oil" ` +
+      `is NOT the same as "butter", and having one does not mean the other is available. ` +
+      (willBuy
+        ? `The user is willing to BUY a few missing ingredients, so recipes may include items not on hand (mark those "have": false). Still prioritize using what they already have and keep the shopping list short. `
+        : `The FIRST recipe in your list MUST be fully cookable RIGHT NOW using only the available ingredients plus those three seasonings (every one of its "ingredients" must have "have": true). `) +
+      `Make it a real, appetizing dish — if the available items are limited, pick the best simple classic ` +
+      `that genuinely works with them (e.g. an omelette, a simple pasta, a salad), never an implausible mashup. ` +
+      `Then propose 2 more recipes that may need a few extra items (mark those "have": false). ` +
+      `Additional rules: never suggest unappetizing or absurd combinations; include at least one ` +
+      `traditional/canonical dish with a high authenticity_percent (ideally 90-100). ` +
+      `CRITICAL: set "have": true ONLY for an ingredient whose name clearly matches an item in the available ` +
+      `list (or is salt/black pepper/water). For every other ingredient set "have": false. When unsure, use false. ` +
+      `Quantity tolerance: if the user has a quantity of an ingredient, you may design a recipe that uses up to ~20% ` +
+      `MORE than they have and still treat it as available ("have": true) — e.g. if they have 75 g cheese, a recipe ` +
+      `calling for 80-90 g is fine. Only mark an ingredient as "have": false when the recipe truly needs substantially ` +
+      `more than is on hand, or the ingredient is absent entirely. ` +
+      `NAMING: when a recipe ingredient is one the user already has, use the user’s EXACT product name as written in the available list (e.g. if they have "черешня", call it "черешня" — do NOT rename it to "вишня" or add qualifiers like "frozen"/"fresh"). This applies to NAMES only — still use natural cooking measurements for amounts (tbsp, tsp, clove, pinch, etc.), NOT the user’s storage units. `;
+
 
 
   const imagePromptRules =
@@ -110,8 +131,14 @@ export async function POST(req: Request) {
     `If pasta, noodles, rice, burgers, pizza, sushi or other unrelated foods are not part of the recipe, explicitly say they must not appear. ` +
     `Always include: photorealistic food photography, natural appetizing light, no text, no labels, no people, no hands, no packaging, no watermark. `;
 
-  const userPrompt =
-    body.method === 'photo' && body.imageBase64
+  const userPrompt = skippedIngredients
+    ? `The user skipped ingredient selection. Generate 3 authentic/classic recipe ideas using canonical ingredients, not pantry-first substitutions. ` +
+      categoryHint + dishHint +
+      equipmentGuidance +
+      qualityRules +
+      imagePromptRules +
+      `${RECIPE_JSON_SHAPE} Return JSON: { "recipes": Recipe[] } with exactly 3 recipes ordered best-first.`
+    : body.method === 'photo' && body.imageBase64
       ? `Look at the photo of ingredients. Recognize what's there, then propose 3 recipes the user can make. ` +
         `Consider also any text ingredients: ${ingredientList || '(none)'}. ` +
         categoryHint + dishHint +
