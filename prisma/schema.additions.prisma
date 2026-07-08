@@ -1,0 +1,44 @@
+// ============================================================================
+// eVPN / evsVPN — add these models to your existing prisma/schema.prisma,
+// then run:  npx prisma migrate dev --name vpn_accounts
+//
+// Model of the activation-key / multi-device system:
+//  - A VpnAccount is one "license", identified by a shareable activationKey.
+//    It's minted when a user gets Premium (a store purchase → keyed by the
+//    RevenueCat appUserId) or redeems a promo code (source = "promo").
+//  - Each device the user activates is a VpnDevice under that account.
+//  - maxDevices caps how many devices one key unlocks (default 10). The cap is
+//    enforced server-side — the client cannot be trusted to enforce it.
+//  - Removing a device frees a slot; that device loses Premium on its next
+//    /verify call.
+// ============================================================================
+
+model VpnAccount {
+  id            String      @id @default(cuid())
+  activationKey String      @unique          // the shareable key, e.g. EVS-7K4M-9QPT-3XR2
+  source        String                       // "purchase" | "promo"
+  appUserId     String?     @unique          // RevenueCat app_user_id (purchase accounts)
+  promoCode     String?                      // which promo minted it (promo accounts)
+  entitlement   String      @default("premium")
+  maxDevices    Int         @default(10)
+  expiresAt     DateTime?                     // optional, for time-limited promos
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  devices       VpnDevice[]
+
+  @@index([appUserId])
+}
+
+model VpnDevice {
+  id         String     @id @default(cuid())
+  account    VpnAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId  String
+  deviceId   String                          // stable per-install id from the app
+  name       String?
+  platform   String?
+  lastSeenAt DateTime   @default(now())
+  createdAt  DateTime   @default(now())
+
+  @@unique([accountId, deviceId])
+  @@index([deviceId])
+}
