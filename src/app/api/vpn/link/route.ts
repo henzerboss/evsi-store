@@ -51,6 +51,7 @@ export async function POST(req: Request) {
     appUserId?: string;
     promoCode?: string;
     key?: string;
+    code?: string; // unified: could be an activation key OR a promo code
   };
   try {
     body = await req.json();
@@ -68,7 +69,26 @@ export async function POST(req: Request) {
     | { id: string; activationKey: string; entitlement: string; maxDevices: number }
     | null = null;
 
-  if (body.key) {
+  // Unified single-field input: try it as an activation key first, then as a
+  // promo code. This powers the one "Enter key" field in Settings.
+  if (body.code) {
+    const asKey = await prisma.vpnAccount.findUnique({ where: { activationKey: norm(body.code) } });
+    if (asKey) {
+      account = asKey;
+    } else {
+      const check = validatePromo(body.code);
+      if (!check.valid) return json({ ok: false, entitlement: null, error: 'invalid_key' }, 200, headers);
+      account = await prisma.vpnAccount.create({
+        data: {
+          activationKey: generateActivationKey(),
+          source: 'promo',
+          promoCode: body.code.trim(),
+          entitlement: 'premium',
+          expiresAt: check.until ? new Date(check.until) : null,
+        },
+      });
+    }
+  } else if (body.key) {
     account = await prisma.vpnAccount.findUnique({ where: { activationKey: norm(body.key) } });
     if (!account) return json({ ok: false, entitlement: null, error: 'invalid_key' }, 200, headers);
   } else if (body.promoCode) {
