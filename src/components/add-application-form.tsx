@@ -89,6 +89,12 @@ export function AddApplicationForm() {
             <Textarea id="privacyPolicy_en" name="privacyPolicy_en" rows={10} />
           </div>
 
+          {/* Terms of Use */}
+          <div className="space-y-2">
+            <label htmlFor="terms_en">Terms of Use (на английском)</label>
+            <Textarea id="terms_en" name="terms_en" rows={10} />
+          </div>
+
           <SubmitButton text="Добавить приложение" pendingText="Добавление..." />
         </form>
       </CardContent>

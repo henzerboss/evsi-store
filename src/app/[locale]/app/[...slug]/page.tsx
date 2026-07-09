@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma';
 import { notFound } from 'next/navigation';
 import type { Application } from "@prisma/client";
 import { AppPageClient } from '@/components/app-page-client';
+import { ApplicationTermsPage } from '@/components/application-terms-page';
 
 function getLocalizedValue(app: Application, fieldPrefix: 'title' | 'shortDescription' | 'description', locale: string): string | null {
   const localesInOrder = [locale, 'en', 'es', 'ru'];
@@ -26,6 +27,14 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
 
     const title = getLocalizedValue(app, 'title', locale) || app.slug;
     const description = getLocalizedValue(app, 'shortDescription', locale) || '';
+    const pageType = slug[1];
+
+    if (pageType === 'terms') {
+        return {
+            title: `Terms of Use for ${title}`,
+            description: `Terms of Use for ${title}.`,
+        };
+    }
 
     return {
         title: `${title} | iOS, Android`,
@@ -36,7 +45,8 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
 export default async function AppPage({ params }: { params: Promise<{ locale: string, slug: string[] }> }) {
     const { locale, slug } = await params;
     const appSlug = slug[0];
-    const isPrivacyOpen = slug.length > 1 && slug[1] === 'privacy';
+    const pageType = slug[1];
+    const isPrivacyOpen = pageType === 'privacy';
 
     const app = await prisma.application.findUnique({ where: { slug: appSlug } });
 
@@ -48,6 +58,16 @@ export default async function AppPage({ params }: { params: Promise<{ locale: st
         title: getLocalizedValue(app, 'title', locale) || app.slug,
         description: getLocalizedValue(app, 'description', locale) || 'No description available.',
     };
+
+    if (pageType === 'terms') {
+        return (
+            <ApplicationTermsPage
+                slug={app.slug}
+                title={localizedData.title}
+                termsText={app.terms_en || ''}
+            />
+        );
+    }
 
     return (
         <AppPageClient

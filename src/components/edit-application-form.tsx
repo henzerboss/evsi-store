@@ -83,6 +83,11 @@ export function EditApplicationForm({ app }: { app: Application }) {
             <Textarea id="privacyPolicy_en" name="privacyPolicy_en" rows={10} defaultValue={app.privacyPolicy_en ?? ''} />
           </div>
 
+          <div className="space-y-2">
+            <label htmlFor="terms_en">Terms of Use (на английском)</label>
+            <Textarea id="terms_en" name="terms_en" rows={10} defaultValue={app.terms_en ?? ''} />
+          </div>
+
           <SubmitButton text="Сохранить изменения" pendingText="Сохранение..." />
         </form>
       </CardContent>

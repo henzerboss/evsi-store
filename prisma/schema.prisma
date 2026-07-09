@@ -29,6 +29,7 @@ model Application {
   githubUrl     String?
 
   privacyPolicy_en String?
+  terms_en         String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
