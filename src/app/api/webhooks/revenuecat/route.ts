@@ -78,6 +78,7 @@ type RevenueCatEvent = {
 const PROJECTS_BY_KEY: Record<string, { name: string; emoji: string }> = {
   caloriecounterai: { name: 'Calorie Counter Photo AI', emoji: '🥗' },
   dishkin: { name: 'Dishkin AI', emoji: '🍳' },
+  evsvpn: { name: 'evsVPN', emoji: '🛡️' },
 
   // QuitNic AI, но технический ключ лучше оставить quitsmoke,
   // чтобы потом отдельно добавить quitvape.
@@ -93,6 +94,7 @@ const PROJECTS_BY_KEY: Record<string, { name: string; emoji: string }> = {
 // если захочешь определять проект даже без ?project=...
 const PROJECTS_BY_REVENUECAT_APP_ID: Record<string, { name: string; emoji: string }> = {
   // 'appxxxxxxxxxxxx': { name: 'Calorie Counter Photo AI', emoji: '🥗' },
+  // 'appxxxxxxxxxxxx': { name: 'evsVPN', emoji: '🛡️' },
 };
 
 const STORE_LABELS: Record<string, string> = {
@@ -293,6 +295,7 @@ function getExpectedAuth(projectKey: string | null): string | undefined {
   // Или отдельные по проектам:
   // REVENUECAT_WEBHOOK_AUTH_CALORIECOUNTERAI=...
   // REVENUECAT_WEBHOOK_AUTH_DISHKIN=...
+  // REVENUECAT_WEBHOOK_AUTH_EVSVPN=...
   // REVENUECAT_WEBHOOK_AUTH_QUITSMOKE=...
 
   if (projectKey) {
@@ -314,6 +317,7 @@ function getHmacSecret(projectKey: string | null): string | undefined {
   //
   // Или отдельные:
   // REVENUECAT_WEBHOOK_HMAC_SECRET_CALORIECOUNTERAI=...
+  // REVENUECAT_WEBHOOK_HMAC_SECRET_EVSVPN=...
   // REVENUECAT_WEBHOOK_HMAC_SECRET_QUITSMOKE=...
 
   if (projectKey) {
@@ -330,6 +334,7 @@ function getHmacSecret(projectKey: string | null): string | undefined {
 function getTelegramChatId(projectKey: string | null): string | undefined {
   // Можно отправлять разные проекты в разные чаты:
   // TELEGRAM_CHAT_ID_RC_CALORIECOUNTERAI=...
+  // TELEGRAM_CHAT_ID_RC_EVSVPN=...
   // TELEGRAM_CHAT_ID_RC_QUITSMOKE=...
   //
   // Или общий чат:
