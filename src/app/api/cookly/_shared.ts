@@ -34,7 +34,7 @@ export function cors(origin: string) {
 
 // In-memory rate limit (per IP), consistent with other routes in this project.
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const LIMIT = 120;
+const LIMIT = 5000;
 const WINDOW_MS = 60 * 60 * 1000;
 
 export function checkRateLimit(ip: string): boolean {
