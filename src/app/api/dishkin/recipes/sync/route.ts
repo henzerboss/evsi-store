@@ -15,6 +15,7 @@ const payloadSchema = z.object({
   locale: z.string().min(2).max(8),
   recipe: recipeSchema,
   rating: z.number().int().min(0).max(5).optional().nullable(),
+  voterId: z.string().min(20).max(120).regex(/^[a-zA-Z0-9-]+$/).optional().nullable(),
   photoBase64: z.string().max(4_000_000).optional().nullable(),
   photoMimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']).optional().nullable(),
 }).passthrough();

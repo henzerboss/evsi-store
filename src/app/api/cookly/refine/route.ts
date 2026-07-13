@@ -49,7 +49,7 @@ export async function POST(req: Request) {
   const userPrompt =
     `Here is an existing recipe as JSON:\n${JSON.stringify(body.recipe)}\n\n` +
     `Apply this change requested by the user: "${body.instruction}". ` +
-    `Re-evaluate authenticity_percent after the change. ` +
+    `Re-evaluate authenticity_percent after the change. Always regenerate image_prompt_en so it accurately describes the refined final dish; never copy the old image prompt unchanged when the visible result changes. ` +
     equipmentGuidance +
     `${RECIPE_JSON_SHAPE} Return JSON: { "recipe": Recipe }.`;
 
