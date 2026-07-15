@@ -20,7 +20,9 @@ type AppCheckJwtPayload = {
   sub?: string;
 };
 
-type JwkWithKid = JsonWebKey & {
+type NodeJsonWebKey = import('node:crypto').webcrypto.JsonWebKey;
+
+type JwkWithKid = NodeJsonWebKey & {
   kty: string;
   kid?: string;
   alg?: string;
@@ -122,7 +124,7 @@ const verifyAppCheckToken = async (token: string): Promise<string> => {
     const valid = verify(
       'RSA-SHA256',
       Buffer.from(`${encodedHeader}.${encodedPayload}`),
-      createPublicKey({ key: refreshedKey as JsonWebKey, format: 'jwk' }),
+      createPublicKey({ key: refreshedKey, format: 'jwk' }),
       Buffer.from(encodedSignature, 'base64url'),
     );
     if (!valid) throw new Error('Invalid App Check signature');
@@ -130,7 +132,7 @@ const verifyAppCheckToken = async (token: string): Promise<string> => {
     const valid = verify(
       'RSA-SHA256',
       Buffer.from(`${encodedHeader}.${encodedPayload}`),
-      createPublicKey({ key: jwk as JsonWebKey, format: 'jwk' }),
+      createPublicKey({ key: jwk, format: 'jwk' }),
       Buffer.from(encodedSignature, 'base64url'),
     );
     if (!valid) throw new Error('Invalid App Check signature');
