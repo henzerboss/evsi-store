@@ -102,6 +102,7 @@ type MetricsLike = {
 const REQUEST_LIMIT = 60;
 const WINDOW_MS = 60 * 60 * 1000;
 const MAX_INPUT_CHARS = 120_000;
+const MAX_REQUEST_BYTES = 512 * 1024;
 const MAX_PROMPT_CHARS = 16_000;
 const MAX_ATTEMPTS_PER_MODEL = 2;
 const DELAY_BETWEEN_ATTEMPTS_MS = 900;
@@ -123,7 +124,7 @@ function cors(origin: string) {
   return {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Client-Token, X-Firebase-AppCheck',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Client-Token',
     Vary: 'Origin',
   };
 }
@@ -683,6 +684,16 @@ const callGeminiWithFallback = async (
 
 export async function POST(req: Request) {
   const headers = cors(req.headers.get('origin') ?? '');
+  const contentType = req.headers.get('content-type')?.toLowerCase() ?? '';
+  const contentLength = Number(req.headers.get('content-length') ?? '0');
+
+  if (!contentType.startsWith('application/json')) {
+    return jsonResponse({ error: 'Content-Type must be application/json' }, 415, headers);
+  }
+
+  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
+    return jsonResponse({ error: 'Request payload is too large' }, 413, headers);
+  }
 
   const rateLimit = checkRateLimit(getClientIp(req));
   if (!rateLimit.allowed) {

@@ -26,6 +26,9 @@ const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 const LIMIT = 100; // 100 запросов
 const WINDOW_MS = 60 * 60 * 1000; // 1 час
+const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
+const MAX_MEDIA_DATA_CHARS = 14_000_000;
+const MAX_TEXT_INPUT_CHARS = 50_000;
 
 // Фоновая очистка старых записей каждые 10 минут
 setInterval(() => {
@@ -43,7 +46,7 @@ function cors(origin: string) {
   return {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Client-Token, X-Firebase-AppCheck',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Client-Token',
     Vary: 'Origin',
   };
 }
@@ -569,6 +572,22 @@ const callGeminiWithFallback = async (
 
 export async function POST(req: Request) {
   const headers = cors(req.headers.get('origin') ?? '');
+  const contentType = req.headers.get('content-type')?.toLowerCase() ?? '';
+  const contentLength = Number(req.headers.get('content-length') ?? '0');
+
+  if (!contentType.startsWith('application/json')) {
+    return new Response(JSON.stringify({ error: 'Content-Type must be application/json' }), {
+      status: 415,
+      headers: { ...headers, 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
+    return new Response(JSON.stringify({ error: 'Request payload is too large' }), {
+      status: 413,
+      headers: { ...headers, 'Content-Type': 'application/json' },
+    });
+  }
 
   // --- ПРОВЕРКА RATE LIMIT ---
   // В x-forwarded-for часто лежит строка вида: "clientIp, proxy1, proxy2"
@@ -626,6 +645,45 @@ export async function POST(req: Request) {
 
   if (!body.input || !body.input.kind) {
     return new Response(JSON.stringify({ error: 'Invalid input' }), {
+      status: 400,
+      headers: { ...headers, 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (body.input.kind === 'text') {
+    if (typeof body.input.text !== 'string' || !body.input.text.trim()) {
+      return new Response(JSON.stringify({ error: 'Text input is empty' }), {
+        status: 400,
+        headers: { ...headers, 'Content-Type': 'application/json' },
+      });
+    }
+    if (body.input.text.length > MAX_TEXT_INPUT_CHARS) {
+      return new Response(JSON.stringify({ error: 'Text input is too large' }), {
+        status: 413,
+        headers: { ...headers, 'Content-Type': 'application/json' },
+      });
+    }
+  } else if (body.input.kind === 'image' || body.input.kind === 'audio') {
+    const expectedMimePrefix = body.input.kind === 'image' ? 'image/' : 'audio/';
+    if (
+      typeof body.input.mimeType !== 'string' ||
+      !body.input.mimeType.toLowerCase().startsWith(expectedMimePrefix) ||
+      typeof body.input.data !== 'string' ||
+      body.input.data.length === 0
+    ) {
+      return new Response(JSON.stringify({ error: 'Invalid media input' }), {
+        status: 400,
+        headers: { ...headers, 'Content-Type': 'application/json' },
+      });
+    }
+    if (body.input.data.length > MAX_MEDIA_DATA_CHARS) {
+      return new Response(JSON.stringify({ error: 'Media input is too large' }), {
+        status: 413,
+        headers: { ...headers, 'Content-Type': 'application/json' },
+      });
+    }
+  } else {
+    return new Response(JSON.stringify({ error: 'Unsupported input kind' }), {
       status: 400,
       headers: { ...headers, 'Content-Type': 'application/json' },
     });
