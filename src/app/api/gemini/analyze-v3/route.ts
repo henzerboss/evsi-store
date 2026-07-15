@@ -1,3 +1,5 @@
+import { authorizeCalorieCounterRequest } from '@/lib/calorieCounterRequestAuth';
+
 export const runtime = 'nodejs';
 
 declare const process: {
@@ -41,7 +43,7 @@ function cors(origin: string) {
   return {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Client-Token',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Client-Token, X-Firebase-AppCheck',
     Vary: 'Origin',
   };
 }
@@ -89,8 +91,6 @@ const NUTRIENT_KEYS = [
   'vitaminK',
   'caffeine',
 ] as const;
-
-const NUTRIENT_SCHEMA = NUTRIENT_KEYS.map((key) => `"${key}": null`).join(',');
 
 const sanitizeLocale = (locale?: string | null): string => {
   const normalized = (locale || 'en').replace('_', '-').trim();
@@ -163,28 +163,32 @@ weight_g and components[].weight_g are total estimated grams.
 Use null only when the food cannot be identified or when a premium nutrient is genuinely impossible to estimate.
 `;
 
-const FREE_SCHEMA = `{
-  "name": "localized food name",
-  "weight_g": 250,
-  "calories_per_100g": 150,
-  "protein_per_100g": 10,
-  "fat_per_100g": 5,
-  "carbs_per_100g": 20
-}`;
+const FREE_FIELDS = [
+  'name',
+  'weight_g',
+  'calories_per_100g',
+  'protein_per_100g',
+  'fat_per_100g',
+  'carbs_per_100g',
+].join(', ');
 
-const PREMIUM_SCHEMA = `{
-  "name": "localized short meal name",
-  "weight_g": 450,
-  "calories_per_100g": 150,
-  "protein_per_100g": 10,
-  "fat_per_100g": 5,
-  "carbs_per_100g": 20,
-  "components": [
-    {"name": "localized component name", "weight_g": 180},
-    {"name": "localized component name", "weight_g": 160}
-  ],
-  "nutrients_per_100g": {${NUTRIENT_SCHEMA}}
-}`;
+const PREMIUM_FIELDS = [
+  FREE_FIELDS,
+  'components',
+  'nutrients_per_100g',
+].join(', ');
+
+const WEIGHT_ESTIMATION_RULES = `
+Weight estimation rules:
+- Never use a fixed default portion and never copy a weight from an example or schema. No sample weight is provided.
+- Estimate this specific serving independently from the visible portion, stated quantity, number of pieces, plate/container scale and typical density of the identified food.
+- For text or audio, use an explicitly stated weight or count first. If none is stated, use a typical serving for that exact food rather than a generic meal weight.
+- For images, estimate each visible edible component separately before calculating the total.
+- Round realistic estimates to the nearest 5 g. Do not repeatedly round unrelated foods to the same large multiple of 50 g.
+- For Premium meals, components[].weight_g should cover all visible edible components and their sum must be within 10% of weight_g. Correct weight_g to the component sum when needed.
+- Do not include the plate, bowl, cup, cutlery, packaging or other non-edible objects in weight_g.
+- If scale cues are weak, choose a conservative dish-specific estimate and do not pretend to have exact certainty.
+`;
 
 const UNITS_INSTRUCTION = `
 Units implied by keys:
@@ -218,7 +222,8 @@ const buildFreePrompt = (input: AnalyzeInput, locale?: string | null): string =>
     task,
     languageInstruction,
     FREE_OUTPUT_RULES,
-    `Use exactly this JSON shape for Free users: ${FREE_SCHEMA}`,
+    `Return exactly these top-level fields for Free users: ${FREE_FIELDS}.`,
+    WEIGHT_ESTIMATION_RULES,
     'If you cannot identify food and the special image compliment case does not apply, return JSON with null values.',
     userText,
   ].join('\n\n');
@@ -248,7 +253,8 @@ const buildPremiumPrompt = (input: AnalyzeInput, locale?: string | null): string
     languageInstruction,
     PREMIUM_OUTPUT_RULES,
     UNITS_INSTRUCTION,
-    `Use exactly this JSON shape for Premium users: ${PREMIUM_SCHEMA}`,
+    `Return exactly these top-level fields for Premium users: ${PREMIUM_FIELDS}.`,
+    WEIGHT_ESTIMATION_RULES,
     'For nutrients_per_100g, make a best-effort estimate for every listed nutrient using typical food composition data for the identified ingredients.',
     'Prefer approximate numeric values over null when the ingredient is clear.',
     'Use 0 only when the nutrient is known to be absent, for example caffeine in a meal without coffee/tea/energy drinks/chocolate.',
@@ -279,6 +285,127 @@ const DEFAULT_PREMIUM_MODEL_ORDER = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-
 
 const normalizeTier = (tier?: string): AnalyzeTier =>
   tier === 'premium' ? 'premium' : 'free';
+
+const nullableNumberSchema = { type: 'NUMBER', nullable: true } as const;
+const nullableStringSchema = { type: 'STRING', nullable: true } as const;
+
+const getResponseSchema = (tier?: string): Record<string, unknown> => {
+  const coreProperties = {
+    name: nullableStringSchema,
+    weight_g: nullableNumberSchema,
+    calories_per_100g: nullableNumberSchema,
+    protein_per_100g: nullableNumberSchema,
+    fat_per_100g: nullableNumberSchema,
+    carbs_per_100g: nullableNumberSchema,
+  };
+
+  if (normalizeTier(tier) === 'free') {
+    return {
+      type: 'OBJECT',
+      properties: coreProperties,
+      required: Object.keys(coreProperties),
+      propertyOrdering: Object.keys(coreProperties),
+    };
+  }
+
+  const nutrientProperties = Object.fromEntries(
+    NUTRIENT_KEYS.map((key) => [key, nullableNumberSchema]),
+  );
+
+  return {
+    type: 'OBJECT',
+    properties: {
+      ...coreProperties,
+      components: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            name: nullableStringSchema,
+            weight_g: nullableNumberSchema,
+          },
+          required: ['name', 'weight_g'],
+          propertyOrdering: ['name', 'weight_g'],
+        },
+      },
+      nutrients_per_100g: {
+        type: 'OBJECT',
+        properties: nutrientProperties,
+        required: [...NUTRIENT_KEYS],
+        propertyOrdering: [...NUTRIENT_KEYS],
+      },
+    },
+    required: [...Object.keys(coreProperties), 'components', 'nutrients_per_100g'],
+    propertyOrdering: [...Object.keys(coreProperties), 'components', 'nutrients_per_100g'],
+  };
+};
+
+type AnalyzeFoodOutput = {
+  weight_g?: number | null;
+  components?: Array<{ name?: string | null; weight_g?: number | null }>;
+  [key: string]: unknown;
+};
+
+const roundWeight = (value: number): number => Math.max(0, Math.round(value / 5) * 5);
+
+const normalizeFoodWeights = (food: AnalyzeFoodOutput, tier?: string): AnalyzeFoodOutput => {
+  if (typeof food.weight_g === 'number' && Number.isFinite(food.weight_g)) {
+    food.weight_g = roundWeight(food.weight_g);
+  }
+
+  if (normalizeTier(tier) !== 'premium' || !Array.isArray(food.components)) {
+    return food;
+  }
+
+  let componentSum = 0;
+  let componentCount = 0;
+
+  food.components = food.components.map((component) => {
+    if (typeof component.weight_g !== 'number' || !Number.isFinite(component.weight_g)) {
+      return component;
+    }
+
+    const rounded = roundWeight(component.weight_g);
+    if (rounded > 0) {
+      componentSum += rounded;
+      componentCount += 1;
+    }
+    return { ...component, weight_g: rounded };
+  });
+
+  if (componentCount > 0 && componentSum > 0) {
+    const total = typeof food.weight_g === 'number' ? food.weight_g : 0;
+    const mismatch = total <= 0 || Math.abs(total - componentSum) / componentSum > 0.1;
+    if (mismatch) food.weight_g = componentSum;
+  }
+
+  return food;
+};
+
+const stripJsonFence = (value: string): string => {
+  const match = value.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  return (match ? match[1] : value).trim();
+};
+
+const normalizeGeminiAnalyzeEnvelope = (raw: string, tier?: string): string => {
+  try {
+    const envelope = JSON.parse(raw) as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+      }>;
+    };
+    const part = envelope.candidates?.[0]?.content?.parts?.find(
+      (candidatePart) => typeof candidatePart.text === 'string',
+    );
+    if (!part?.text) return raw;
+
+    const food = JSON.parse(stripJsonFence(part.text)) as AnalyzeFoodOutput;
+    part.text = JSON.stringify(normalizeFoodWeights(food, tier));
+    return JSON.stringify(envelope);
+  } catch {
+    return raw;
+  }
+};
 
 const uniqueNonEmpty = (values: string[]): string[] => [
   ...new Set(values.map((value) => value.trim()).filter(Boolean)),
@@ -478,12 +605,10 @@ export async function POST(req: Request) {
     });
   }
 
-  const serverToken = process.env.SERVER_CLIENT_TOKEN;
-  const clientToken = req.headers.get('x-client-token');
-
-  if (serverToken && clientToken !== serverToken) {
-    return new Response(JSON.stringify({ error: 'Forbidden' }), {
-      status: 403,
+  const auth = await authorizeCalorieCounterRequest(req);
+  if (!auth.ok) {
+    return new Response(JSON.stringify({ error: auth.error }), {
+      status: auth.status,
       headers: { ...headers, 'Content-Type': 'application/json' },
     });
   }
@@ -530,6 +655,7 @@ export async function POST(req: Request) {
     contents: [{ parts }],
     generationConfig: {
       responseMimeType: 'application/json',
+      responseSchema: getResponseSchema(body.tier),
       maxOutputTokens: generationSettings.maxOutputTokens,
       temperature: generationSettings.temperature,
       thinkingConfig: {
@@ -540,7 +666,11 @@ export async function POST(req: Request) {
 
   const result = await callGeminiWithFallback(apiKey, modelOrder, payload);
 
-  return new Response(result.text, {
+  const responseText = result.response.ok
+    ? normalizeGeminiAnalyzeEnvelope(result.text, body.tier)
+    : result.text;
+
+  return new Response(responseText, {
     status: result.response.status,
     headers: {
       ...headers,
@@ -549,7 +679,7 @@ export async function POST(req: Request) {
       // Можно смотреть в Network/логах, какая модель реально ответила
       'X-Gemini-Model-Used': result.model,
       'X-Gemini-Model-Order': modelOrder.join(','),
-      'X-CalorieCounterAI-Analyze-Version': 'v3',
+      'X-CalorieCounterAI-Analyze-Version': 'v3.1',
     },
   });
 }

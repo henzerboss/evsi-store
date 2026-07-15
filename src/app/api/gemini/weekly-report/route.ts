@@ -1,3 +1,5 @@
+import { authorizeCalorieCounterRequest } from '@/lib/calorieCounterRequestAuth';
+
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
@@ -121,7 +123,7 @@ function cors(origin: string) {
   return {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Client-Token',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Client-Token, X-Firebase-AppCheck',
     Vary: 'Origin',
   };
 }
@@ -698,11 +700,9 @@ export async function POST(req: Request) {
     return jsonResponse({ error: 'GEMINI_API_KEY missing' }, 500, headers);
   }
 
-  const serverToken = process.env.SERVER_CLIENT_TOKEN;
-  const clientToken = req.headers.get('x-client-token');
-
-  if (serverToken && clientToken !== serverToken) {
-    return jsonResponse({ error: 'Forbidden' }, 403, headers);
+  const auth = await authorizeCalorieCounterRequest(req);
+  if (!auth.ok) {
+    return jsonResponse({ error: auth.error }, auth.status, headers);
   }
 
   let body: WeeklyReportRequestBody;
