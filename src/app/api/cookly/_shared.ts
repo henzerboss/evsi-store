@@ -66,7 +66,14 @@ export const LANG_NAME: Record<string, string> = {
   sk: 'Slovak', ro: 'Romanian', hu: 'Hungarian', el: 'Greek', sv: 'Swedish', da: 'Danish',
   fi: 'Finnish', nb: 'Norwegian', ar: 'Arabic', he: 'Hebrew', hi: 'Hindi', th: 'Thai',
   id: 'Indonesian', ja: 'Japanese', ko: 'Korean', zh: 'Chinese',
+  bg: 'Bulgarian', vi: 'Vietnamese', ms: 'Malay', hr: 'Croatian',
 };
+
+/** Resolve both bare app codes (bg) and regional BCP-47 tags (bg-BG). */
+export function getLanguageName(locale: string | undefined): string {
+  const normalized = (locale ?? '').trim().toLowerCase().split(/[-_]/)[0];
+  return LANG_NAME[normalized] ?? 'English';
+}
 
 
 /**
@@ -90,7 +97,7 @@ export function buildEquipmentGuidance(profile: Profile): string {
 
 /** Builds the system instruction enforcing locale, preferences, and JSON-only output. */
 export function buildSystemInstruction(locale: string, profile: Profile): string {
-  const lang = LANG_NAME[locale] ?? 'English';
+  const lang = getLanguageName(locale);
   const parts: string[] = [
     `You are Dishkin, a professional culinary assistant.`,
     `Respond ENTIRELY in ${lang}. All recipe titles, ingredients, and steps MUST be in ${lang}.`,

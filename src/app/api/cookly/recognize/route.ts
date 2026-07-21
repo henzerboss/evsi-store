@@ -1,4 +1,4 @@
-import { cors, checkRateLimit, callGemini, safeJsonParse, LANG_NAME } from '../_shared';
+import { cors, checkRateLimit, callGemini, safeJsonParse, getLanguageName } from '../_shared';
 
 export const runtime = 'nodejs';
 
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: 'bad_request' }), { status: 400, headers });
   }
 
-  const lang = LANG_NAME[body.locale] ?? 'English';
+  const lang = getLanguageName(body.locale);
   const isReceipt = body.mode === 'receipt';
 
   // Tell the model about the user's existing pantry so a recognized item that's the same product
