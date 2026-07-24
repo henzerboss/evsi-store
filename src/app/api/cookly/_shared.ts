@@ -164,6 +164,12 @@ export interface GeminiCallOptions {
   temperature?: number;
   /** Overrides COOKLY_MAX_OUTPUT_TOKENS for this call (keep small for cheap batch jobs). */
   maxOutputTokens?: number;
+  /**
+   * Overrides COOKLY_THINKING_BUDGET for this call. Pass 0 to explicitly
+   * disable thinking (important for models that think by default — thinking
+   * tokens count against maxOutputTokens and can truncate the JSON output).
+   */
+  thinkingBudget?: number;
 }
 
 async function callModelOnce(
@@ -182,8 +188,9 @@ async function callModelOnce(
     maxOutputTokens: options?.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
     responseMimeType: 'application/json',
   };
-  if (THINKING_BUDGET > 0) {
-    generationConfig.thinkingConfig = { thinkingBudget: THINKING_BUDGET };
+  const thinkingBudget = options?.thinkingBudget ?? (THINKING_BUDGET > 0 ? THINKING_BUDGET : undefined);
+  if (thinkingBudget !== undefined) {
+    generationConfig.thinkingConfig = { thinkingBudget };
   }
 
   const res = await fetch(url, {

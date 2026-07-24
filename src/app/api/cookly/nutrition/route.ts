@@ -46,10 +46,15 @@ const SYSTEM_INSTRUCTION =
   'You are a professional nutritionist. Estimate realistic nutrition values for dishes. ' +
   'Return STRICT JSON only — no markdown, no backticks, no commentary.';
 
-function sanitizeItem(raw: NutritionItem, index: number): { id: string; line: string } | null {
+function sanitizeItem(raw: NutritionItem, index: number): { id: string; alias: string; line: string } | null {
   const id = String(raw?.id ?? '').trim().slice(0, 120);
   const title = String(raw?.title ?? '').trim().slice(0, 200);
   if (!id || !title) return null;
+
+  // Short positional alias instead of the (often long) recipe id: the model
+  // echoes it back in every result object, so this trims both prompt and
+  // output tokens and removes id-mangling failures.
+  const alias = String(index + 1);
 
   const servings = Math.min(100, Math.max(1, Math.round(Number(raw?.servings) || 1)));
   const ingredients = (Array.isArray(raw?.ingredients) ? raw.ingredients : [])
@@ -63,9 +68,27 @@ function sanitizeItem(raw: NutritionItem, index: number): { id: string; line: st
     .filter(Boolean)
     .join('; ');
 
-  const line = `${index + 1}. id="${id}" | dish: ${title} | total servings: ${servings}` +
+  const line = `id=${alias} | dish: ${title} | total servings: ${servings}` +
     (ingredients ? ` | ingredients (whole recipe): ${ingredients}` : ' | ingredients: unknown, estimate from the dish name');
-  return { id, line };
+  return { id, alias, line };
+}
+
+/**
+ * Salvages a truncated JSON array (e.g. the model ran out of output budget
+ * mid-object): cut back to the last complete object and close the array.
+ */
+function repairTruncatedArray(text: string): unknown[] | null {
+  const start = text.indexOf('[');
+  if (start === -1) return null;
+  const lastObjectEnd = text.lastIndexOf('}');
+  if (lastObjectEnd <= start) return null;
+  try {
+    const repaired = `${text.slice(start, lastObjectEnd + 1)}]`;
+    const parsed = JSON.parse(repaired);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -101,7 +124,7 @@ export async function POST(req: Request) {
   const rawItems = Array.isArray(body?.items) ? body.items.slice(0, MAX_ITEMS) : [];
   const items = rawItems
     .map((raw, index) => sanitizeItem(raw, index))
-    .filter((item): item is { id: string; line: string } => item !== null);
+    .filter((item): item is { id: string; alias: string; line: string } => item !== null);
   if (!items.length) {
     return new Response(JSON.stringify({ error: 'bad_request', detail: 'items required' }), { status: 400, headers });
   }
@@ -109,15 +132,18 @@ export async function POST(req: Request) {
   const prompt =
     `Estimate nutrition PER ONE SERVING for each dish below (the whole recipe divided by its total servings). ` +
     `"calories" in kcal, "protein"/"carbs"/"fat" in grams — realistic positive numbers for a single serving. ` +
-    `Return a JSON array with EXACTLY ${items.length} objects, one per dish, in the SAME order, ` +
-    `each shaped as { "id": string (echo the given id), "calories": number, "protein": number, "carbs": number, "fat": number }. ` +
+    `Respond with ONLY a JSON array (no wrapper object) of EXACTLY ${items.length} objects, one per dish, in the SAME order, ` +
+    `each shaped as { "id": string (echo the given id, e.g. "1"), "calories": number, "protein": number, "carbs": number, "fat": number }. ` +
     `No other fields, no nesting, no commentary.\n\nDishes:\n${items.map((item) => item.line).join('\n')}`;
 
-  // ~48 output tokens per item is enough for the compact objects; a floor keeps
-  // tiny batches safe. Temperature 0 for repeatable estimates.
+  // A generous budget: the cap only bounds worst-case cost (billing is by
+  // actual tokens), while a tight cap truncates the JSON mid-array — that was
+  // exactly the "bad_ai_response" failure mode. thinkingBudget: 0 explicitly
+  // disables thinking so reasoning tokens can never eat the output budget.
   const result = await callGemini(SYSTEM_INSTRUCTION, prompt, undefined, {
     temperature: 0,
-    maxOutputTokens: Math.max(256, items.length * 48 + 64),
+    maxOutputTokens: Math.max(512, items.length * 128 + 256),
+    thinkingBudget: 0,
   });
   if (!result.ok) {
     return new Response(JSON.stringify({ error: result.error, detail: 'detail' in result ? result.detail : undefined }), {
@@ -127,22 +153,32 @@ export async function POST(req: Request) {
   }
 
   const parsed = safeJsonParse<unknown>(result.text, null);
-  const rows = Array.isArray(parsed) ? parsed : null;
+  let rows: unknown[] | null = Array.isArray(parsed) ? parsed : null;
+  if (!rows && parsed && typeof parsed === 'object') {
+    // Some models wrap the array despite instructions: { "results": [...] }.
+    const firstArray = Object.values(parsed as Record<string, unknown>).find(Array.isArray);
+    if (firstArray) rows = firstArray as unknown[];
+  }
+  if (!rows) rows = repairTruncatedArray(result.text);
   if (!rows) {
-    return new Response(JSON.stringify({ error: 'bad_ai_response' }), { status: 502, headers });
+    return new Response(
+      JSON.stringify({ error: 'bad_ai_response', detail: result.text.slice(0, 300) }),
+      { status: 502, headers },
+    );
   }
 
-  // Match by echoed id first; fall back to positional order for models that
-  // return the right rows but mangle the id echo.
-  const byId = new Map<string, Record<string, unknown>>();
+  // Match by the echoed short alias first; fall back to positional order for
+  // models that return the right rows but mangle the echo. Numeric echoes are
+  // also tolerated (id: 1 instead of "1").
+  const byAlias = new Map<string, Record<string, unknown>>();
   for (const row of rows) {
-    if (row && typeof row === 'object' && typeof (row as Record<string, unknown>).id === 'string') {
-      byId.set(String((row as Record<string, unknown>).id), row as Record<string, unknown>);
+    if (row && typeof row === 'object' && (row as Record<string, unknown>).id !== undefined) {
+      byAlias.set(String((row as Record<string, unknown>).id), row as Record<string, unknown>);
     }
   }
 
   const results: Array<NutritionResult | { id: string; error: string }> = items.map((item, index) => {
-    const row = byId.get(item.id) ?? (rows.length === items.length ? (rows[index] as Record<string, unknown>) : undefined);
+    const row = byAlias.get(item.alias) ?? (rows.length === items.length ? (rows[index] as Record<string, unknown>) : undefined);
     const calories = toFiniteNumber(row?.calories);
     const protein = toFiniteNumber(row?.protein);
     const carbs = toFiniteNumber(row?.carbs);

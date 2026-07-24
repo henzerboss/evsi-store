@@ -22,6 +22,15 @@ Batch per-serving nutrition estimation, built for the dishkin.com admin tool tha
 
 The `Inter` font initialization line was normalized to `Inter({ subsets: ["latin", "cyrillic"] })`. If your current production line differs (e.g. only `["latin"]`), this is a strict superset and safe to deploy; feel free to keep your original line instead — nothing else in this file changed.
 
+### Hotfix (same day): `bad_ai_response` on the nutrition route
+
+The first cut truncated the model output on real-world batches (the output-token cap was too tight once long recipe ids were echoed in every result object), which surfaced as `{"error":"ai_error","detail":"{\"error\":\"bad_ai_response\"}"}` in the dishkin admin tool. Fixed in this build:
+
+- Dishes are numbered with short positional aliases inside the prompt (real recipe ids are mapped back server-side; the API contract is unchanged), trimming both prompt and output tokens.
+- The output budget is now generous (≈128 tokens/dish; billing is by actual tokens, so cost is unaffected) and `thinkingBudget: 0` is sent explicitly so reasoning tokens can never eat the output budget.
+- Parsing is tolerant: markdown fences, a wrapper object around the array, numeric id echoes, and a truncated array (salvaged up to the last complete object — unfinished dishes stay unmarked and are retried on the next pass).
+- `bad_ai_response` now includes the first 300 characters of the raw model output in `detail` for diagnostics.
+
 ## Deployment
 
 No database migration, no schema change, no new secrets. Build and restart with the current production process.
