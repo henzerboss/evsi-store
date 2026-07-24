@@ -12,7 +12,7 @@ import { Footer } from "@/components/footer";
 import { GoogleAnalytics } from '@next/third-parties/google'; // <-- ИМПОРТ
 import { CookieConsent } from '@/components/cookie-consent'; // <-- ИМПОРТ
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ subsets: ["latin", "cyrillic"] });
 
 export const metadata: Metadata = {
   title: "evsi.store",

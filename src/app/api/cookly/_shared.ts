@@ -138,6 +138,10 @@ Each recipe object MUST have exactly:
   "nutrition": { "calories": number, "protein": number, "carbs": number, "fat": number },
   "categories": string[]
 }
+"nutrition" is MANDATORY — never omit it, never use null. All four values MUST be
+estimated PER ONE SERVING (the whole recipe divided by "servings"), not for the
+entire recipe: "calories" in kcal, "protein"/"carbs"/"fat" in grams. Values must be
+realistic positive numbers for a single serving of this dish.
 Set "have": true for ingredients that are in the user's provided list, false otherwise.
 For "categories": pick the most fitting from the provided known-categories list when given; you may also add one short new category if none fit. Keep 1-3 categories.
 
@@ -155,19 +159,27 @@ type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: str
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+export interface GeminiCallOptions {
+  /** Overrides COOKLY_TEMPERATURE for this call (e.g. 0 for deterministic nutrition estimates). */
+  temperature?: number;
+  /** Overrides COOKLY_MAX_OUTPUT_TOKENS for this call (keep small for cheap batch jobs). */
+  maxOutputTokens?: number;
+}
+
 async function callModelOnce(
   model: string,
   apiKey: string,
   systemInstruction: string,
-  parts: GeminiPart[]
+  parts: GeminiPart[],
+  options?: GeminiCallOptions
 ): Promise<{ ok: true; text: string } | { ok: false; status: number; error: string }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   // Build generationConfig from env. thinkingConfig is only sent when a budget is set
   // (and is silently ignored by models that don't support it).
   const generationConfig: Record<string, unknown> = {
-    temperature: TEMPERATURE,
-    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    temperature: options?.temperature ?? TEMPERATURE,
+    maxOutputTokens: options?.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
     responseMimeType: 'application/json',
   };
   if (THINKING_BUDGET > 0) {
@@ -194,7 +206,7 @@ async function callModelOnce(
   return { ok: true, text };
 }
 
-export async function callGemini(systemInstruction: string, userPrompt: string, imageBase64?: string) {
+export async function callGemini(systemInstruction: string, userPrompt: string, imageBase64?: string, options?: GeminiCallOptions) {
   const apiKey = process.env.RECIPE_GEMINI_API_KEY;
   if (!apiKey) {
     return { ok: false as const, status: 500, error: 'RECIPE_GEMINI_API_KEY missing' };
@@ -212,7 +224,7 @@ export async function callGemini(systemInstruction: string, userPrompt: string, 
   for (const model of COOKLY_MODELS) {
     for (let attempt = 0; attempt < ATTEMPTS_PER_MODEL; attempt++) {
       try {
-        const r = await callModelOnce(model, apiKey, systemInstruction, parts);
+        const r = await callModelOnce(model, apiKey, systemInstruction, parts, options);
         if (r.ok) return { ok: true as const, text: r.text };
         lastError = r.error;
       } catch (e) {
