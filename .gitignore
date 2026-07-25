@@ -43,3 +43,6 @@ next-env.d.ts
 /generated/prisma
 evsi.store.zip
 *.zip
+
+# RevenueCat daily summary runtime files
+/data/revenuecat-summary/

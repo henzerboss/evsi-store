@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
+import { appendRevenueCatSummaryEvent } from '@/lib/revenuecatDailySummary';
 
 export const runtime = 'nodejs';
 
@@ -79,6 +80,7 @@ const PROJECTS_BY_KEY: Record<string, { name: string; emoji: string }> = {
   caloriecounterai: { name: 'Calorie Counter Photo AI', emoji: '🥗' },
   dishkin: { name: 'Dishkin AI', emoji: '🍳' },
   evsvpn: { name: 'evsVPN', emoji: '🛡️' },
+  evpdf: { name: 'evPDF', emoji: '📄' },
 
   // QuitNic AI, но технический ключ лучше оставить quitsmoke,
   // чтобы потом отдельно добавить quitvape.
@@ -297,6 +299,7 @@ function getExpectedAuth(projectKey: string | null): string | undefined {
   // REVENUECAT_WEBHOOK_AUTH_DISHKIN=...
   // REVENUECAT_WEBHOOK_AUTH_EVSVPN=...
   // REVENUECAT_WEBHOOK_AUTH_QUITSMOKE=...
+  // REVENUECAT_WEBHOOK_AUTH_EVPDF=...
 
   if (projectKey) {
     const envKey = `REVENUECAT_WEBHOOK_AUTH_${projectKey
@@ -319,6 +322,7 @@ function getHmacSecret(projectKey: string | null): string | undefined {
   // REVENUECAT_WEBHOOK_HMAC_SECRET_CALORIECOUNTERAI=...
   // REVENUECAT_WEBHOOK_HMAC_SECRET_EVSVPN=...
   // REVENUECAT_WEBHOOK_HMAC_SECRET_QUITSMOKE=...
+  // REVENUECAT_WEBHOOK_HMAC_SECRET_EVPDF=...
 
   if (projectKey) {
     const envKey = `REVENUECAT_WEBHOOK_HMAC_SECRET_${projectKey
@@ -336,6 +340,7 @@ function getTelegramChatId(projectKey: string | null): string | undefined {
   // TELEGRAM_CHAT_ID_RC_CALORIECOUNTERAI=...
   // TELEGRAM_CHAT_ID_RC_EVSVPN=...
   // TELEGRAM_CHAT_ID_RC_QUITSMOKE=...
+  // TELEGRAM_CHAT_ID_RC_EVPDF=...
   //
   // Или общий чат:
   // TELEGRAM_CHAT_ID_RC=...
@@ -446,206 +451,56 @@ function verifyRevenueCatHmacSignature(params: {
   }
 }
 
+function isTrialEvent(event: RevenueCatEvent): boolean {
+  return event.period_type?.trim().toUpperCase() === 'TRIAL';
+}
+
+function shouldSuppressIndividualNotification(event: RevenueCatEvent): boolean {
+  const type = event.type?.trim().toUpperCase();
+
+  // Триалы учитываются в суточной сводке, но отдельное сообщение не отправляется.
+  if (isTrialEvent(event)) return true;
+
+  // Проблемы с оплатой также остаются только в суточной сводке.
+  if (type === 'BILLING_ISSUE') return true;
+
+  return false;
+}
+
 function buildTelegramMessage(event: RevenueCatEvent, projectKey: string | null): string {
-  const type = event.type || 'UNKNOWN';
+  const type = event.type?.trim().toUpperCase() || 'UNKNOWN';
   const project = getProjectInfo(projectKey, event);
-
   const title = EVENT_TITLES[type] || `ℹ️ Событие: ${type}`;
-  const priceText = getPriceText(event);
-  const storeLabel = getStoreLabel(event.store);
-  const reasonText = getReasonText(event);
+  const priceText = getPriceText(event) || '—';
+  const storeLabel = getStoreLabel(event.store) || '—';
+  const productText = event.new_product_id
+    ? `${event.product_id || '—'} → ${event.new_product_id}`
+    : event.product_id || '—';
+  const trialConversion =
+    typeof event.is_trial_conversion === 'boolean'
+      ? event.is_trial_conversion
+        ? 'да'
+        : 'нет'
+      : '—';
 
-  const eventDate = formatDateTime(event.event_timestamp_ms);
-  const purchasedAt = formatDateTime(event.purchased_at_ms);
-  const expirationAt = formatDateTime(event.expiration_at_ms);
-  const gracePeriodExpirationAt = formatDateTime(event.grace_period_expiration_at_ms);
-  const autoResumeAt = formatDateTime(event.auto_resume_at_ms);
-
-  const lines: string[] = [
+  return [
     `<b>${escapeHtml(title)}</b>`,
     '',
     `📱 <b>Проект:</b> ${escapeHtml(`${project.emoji} ${project.name}`)}`,
-  ];
-
-  if (event.environment) {
-    lines.push(`🧪 <b>Среда:</b> ${code(event.environment)}`);
-  }
-
-  if (event.country_code) {
-    lines.push(`🌍 <b>Страна:</b> ${escapeHtml(formatCountry(event.country_code))}`);
-  }
-
-  if (priceText) {
-    lines.push(`💵 <b>Сумма:</b> ${escapeHtml(priceText)}`);
-  }
-
-  if (event.product_id) {
-    lines.push(`📦 <b>Товар:</b> ${code(event.product_id)}`);
-  }
-
-  if (event.new_product_id) {
-    lines.push(`🔁 <b>Новый товар:</b> ${code(event.new_product_id)}`);
-  }
-
-  if (storeLabel) {
-    lines.push(`🏪 <b>Магазин:</b> ${escapeHtml(storeLabel)}`);
-  }
-
-  if (event.period_type) {
-    lines.push(`📆 <b>Период:</b> ${code(event.period_type)}`);
-  }
-
-  if (typeof event.renewal_number === 'number') {
-    lines.push(`🔢 <b>Renewal #:</b> ${code(event.renewal_number)}`);
-  }
-
-  if (typeof event.is_trial_conversion === 'boolean') {
-    lines.push(
-      `🎯 <b>Trial conversion:</b> ${event.is_trial_conversion ? 'да' : 'нет'}`,
-    );
-  }
-
-  if (event.entitlement_ids?.length) {
-    lines.push(`🔓 <b>Entitlements:</b> ${code(event.entitlement_ids.join(', '))}`);
-  } else if (event.entitlement_id) {
-    lines.push(`🔓 <b>Entitlement:</b> ${code(event.entitlement_id)}`);
-  }
-
-  if (event.presented_offering_id) {
-    lines.push(`🧩 <b>Offering:</b> ${code(event.presented_offering_id)}`);
-  }
-
-  if (event.offer_code) {
-    lines.push(`🏷️ <b>Offer code:</b> ${code(event.offer_code)}`);
-  }
-
-  if (reasonText) {
-    lines.push(`📝 <b>Причина:</b> ${code(reasonText)}`);
-  }
-
-  if (purchasedAt) {
-    lines.push(`🛒 <b>Покупка:</b> ${escapeHtml(purchasedAt)}`);
-  }
-
-  if (expirationAt) {
-    lines.push(`⌛ <b>Истекает:</b> ${escapeHtml(expirationAt)}`);
-  }
-
-  if (gracePeriodExpirationAt) {
-    lines.push(`⏳ <b>Grace period до:</b> ${escapeHtml(gracePeriodExpirationAt)}`);
-  }
-
-  if (autoResumeAt) {
-    lines.push(`▶️ <b>Auto resume:</b> ${escapeHtml(autoResumeAt)}`);
-  }
-
-  if (event.transferred_from?.length) {
-    lines.push(`↩️ <b>Transfer from:</b> ${code(event.transferred_from.join(', '))}`);
-  }
-
-  if (event.transferred_to?.length) {
-    lines.push(`↪️ <b>Transfer to:</b> ${code(event.transferred_to.join(', '))}`);
-  }
-
-  if (event.paywall_name || event.paywall_id) {
-    lines.push('');
-    lines.push(`🧱 <b>Paywall:</b> ${code(event.paywall_name || event.paywall_id)}`);
-  }
-
-  if (event.platform) {
-    lines.push(`📲 <b>Platform:</b> ${code(event.platform)}`);
-  }
-
-  if (event.locale) {
-    lines.push(`🌐 <b>Locale:</b> ${code(event.locale)}`);
-  }
-
-  if (event.offering_id) {
-    lines.push(`🧩 <b>Paywall offering:</b> ${code(event.offering_id)}`);
-  }
-
-  if (event.component_type) {
-    lines.push(`👆 <b>Component:</b> ${code(event.component_type)}`);
-  }
-
-  if (event.component_name) {
-    lines.push(`🏷️ <b>Component name:</b> ${code(event.component_name)}`);
-  }
-
-  if (event.component_value) {
-    lines.push(`🔘 <b>Component value:</b> ${code(event.component_value)}`);
-  }
-
-  if (event.current_product_id) {
-    lines.push(`📦 <b>Current product:</b> ${code(event.current_product_id)}`);
-  }
-
-  if (event.resulting_product_id) {
-    lines.push(`📦 <b>Resulting product:</b> ${code(event.resulting_product_id)}`);
-  }
-
-  if (event.destination_product_id) {
-    lines.push(`📦 <b>Destination product:</b> ${code(event.destination_product_id)}`);
-  }
-
-  if (event.experiment_id) {
-    lines.push('');
-    lines.push(`🧪 <b>Experiment:</b> ${code(event.experiment_id)}`);
-  }
-
-  if (event.experiment_variant) {
-    lines.push(`🧪 <b>Variant:</b> ${code(event.experiment_variant)}`);
-  }
-
-  if (event.redemption_outcome) {
-    lines.push('');
-    lines.push(`🎟️ <b>Redemption outcome:</b> ${code(event.redemption_outcome)}`);
-  }
-
-  if (event.redemption_platform) {
-    lines.push(`🎟️ <b>Redemption platform:</b> ${code(event.redemption_platform)}`);
-  }
-
-  if (event.redeemed_from?.length) {
-    lines.push(`🎟️ <b>Redeemed from:</b> ${code(event.redeemed_from.join(', '))}`);
-  }
-
-  if (event.redeemed_by?.length) {
-    lines.push(`🎟️ <b>Redeemed by:</b> ${code(event.redeemed_by.join(', '))}`);
-  }
-
-  lines.push('');
-  lines.push(`👤 <b>User:</b> ${code(event.app_user_id)}`);
-
-  if (event.original_app_user_id && event.original_app_user_id !== event.app_user_id) {
-    lines.push(`👤 <b>Original User:</b> ${code(event.original_app_user_id)}`);
-  }
-
-  if (event.aliases?.length) {
-    lines.push(`👥 <b>Aliases:</b> ${code(event.aliases.join(', '))}`);
-  }
-
-  if (event.transaction_id) {
-    lines.push(`🧾 <b>Transaction:</b> ${code(event.transaction_id)}`);
-  }
-
-  if (event.original_transaction_id) {
-    lines.push(`🧾 <b>Original transaction:</b> ${code(event.original_transaction_id)}`);
-  }
-
-  if (event.app_id) {
-    lines.push(`🆔 <b>RC app_id:</b> ${code(event.app_id)}`);
-  }
-
-  if (event.id) {
-    lines.push(`🔗 <b>Event ID:</b> ${code(event.id)}`);
-  }
-
-  if (eventDate) {
-    lines.push(`🕒 <b>Event time:</b> ${escapeHtml(eventDate)}`);
-  }
-
-  return lines.join('\n');
+    '',
+    `🌍 <b>Страна:</b> ${escapeHtml(formatCountry(event.country_code))}`,
+    `💵 <b>Сумма:</b> ${escapeHtml(priceText)}`,
+    `📦 <b>Товар:</b> ${code(productText)}`,
+    `🏪 <b>Магазин:</b> ${escapeHtml(storeLabel)}`,
+    `📆 <b>Период:</b> ${code(event.period_type || '—')}`,
+    `🔢 <b>Renewal #:</b> ${code(
+      typeof event.renewal_number === 'number' ? event.renewal_number : '—',
+    )}`,
+    `🎯 <b>Trial conversion:</b> ${trialConversion}`,
+    '',
+    '',
+    `👤 <b>User:</b> ${code(event.app_user_id || '—')}`,
+  ].join('\n');
 }
 
 async function sendTelegramMessage(params: {
@@ -744,12 +599,27 @@ export async function POST(request: NextRequest) {
 
     const type = event.type.toUpperCase();
 
-    if (isIgnoredEventType(type)) {
-      return NextResponse.json({ ok: true, ignored: true, type });
-    }
-
     if (shouldSkipSandbox(event)) {
       return NextResponse.json({ ok: true, skipped: 'sandbox', type });
+    }
+
+    const project = getProjectInfo(projectKey, event);
+
+    // Записываем все реальные операции для суточной сводки до фильтрации
+    // индивидуальных Telegram-уведомлений. TEST и sandbox (по умолчанию)
+    // библиотека сводки отфильтрует самостоятельно.
+    await appendRevenueCatSummaryEvent({
+      event,
+      projectKey,
+      projectName: `${project.emoji} ${project.name}`,
+    });
+
+    if (shouldSuppressIndividualNotification(event)) {
+      return NextResponse.json({ ok: true, ignored: true, reason: 'individual_notification_suppressed', type });
+    }
+
+    if (isIgnoredEventType(type)) {
+      return NextResponse.json({ ok: true, ignored: true, type });
     }
 
     const message = buildTelegramMessage(event, projectKey);
