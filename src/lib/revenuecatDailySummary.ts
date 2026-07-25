@@ -240,12 +240,42 @@ function isTrialStart(record: RevenueCatSummaryRecord): boolean {
   );
 }
 
+function isPaidInitialPurchase(record: RevenueCatSummaryRecord): boolean {
+  return record.event.type?.toUpperCase() === 'INITIAL_PURCHASE' && !isTrialStart(record);
+}
+
+function isRenewal(record: RevenueCatSummaryRecord): boolean {
+  return record.event.type?.toUpperCase() === 'RENEWAL';
+}
+
 function isRevenueEvent(record: RevenueCatSummaryRecord): boolean {
   const type = record.event.type?.toUpperCase();
 
-  if (isTrialStart(record)) return false;
+  return isPaidInitialPurchase(record) || isRenewal(record) || type === 'NON_RENEWING_PURCHASE';
+}
 
-  return type === 'INITIAL_PURCHASE' || type === 'RENEWAL' || type === 'NON_RENEWING_PURCHASE';
+function buildUsdAmountText(records: RevenueCatSummaryRecord[]): string {
+  if (!records.length) return '$0.00';
+
+  let total = 0;
+  let knownPrices = 0;
+  let missingPrices = 0;
+
+  for (const record of records) {
+    const price = record.event.price;
+
+    if (typeof price === 'number' && Number.isFinite(price)) {
+      total += price;
+      knownPrices += 1;
+    } else {
+      missingPrices += 1;
+    }
+  }
+
+  if (!knownPrices) return 'нет данных';
+
+  const amount = `$${total.toFixed(2)}`;
+  return missingPrices ? `${amount} (+${missingPrices} без цены)` : amount;
 }
 
 function formatCurrency(amount: number, currency: string): string {
@@ -311,22 +341,24 @@ function pluralOperations(count: number): string {
 }
 
 function buildProjectLine(projectName: string, records: RevenueCatSummaryRecord[]): string {
-  const trials = records.filter(isTrialStart).length;
-  const purchases = records.filter(
-    (record) => record.event.type?.toUpperCase() === 'INITIAL_PURCHASE' && !isTrialStart(record),
-  ).length;
-  const renewals = records.filter((record) => record.event.type?.toUpperCase() === 'RENEWAL').length;
+  const trialRecords = records.filter(isTrialStart);
+  const purchaseRecords = records.filter(isPaidInitialPurchase);
+  const renewalRecords = records.filter(isRenewal);
   const cancellations = records.filter(
     (record) => record.event.type?.toUpperCase() === 'CANCELLATION',
   ).length;
-  const revenue = buildRevenueText(records);
 
   const details: string[] = [];
-  if (purchases) details.push(`продажи: ${purchases}`);
-  if (trials) details.push(`триалы: ${trials}`);
-  if (renewals) details.push(`продления: ${renewals}`);
+  if (purchaseRecords.length) {
+    details.push(`продажи: ${purchaseRecords.length} / ${buildUsdAmountText(purchaseRecords)}`);
+  }
+  if (trialRecords.length) {
+    details.push(`триалы: ${trialRecords.length} / ${buildUsdAmountText(trialRecords)}`);
+  }
+  if (renewalRecords.length) {
+    details.push(`продления: ${renewalRecords.length} / ${buildUsdAmountText(renewalRecords)}`);
+  }
   if (cancellations) details.push(`отмены: ${cancellations}`);
-  if (revenue) details.push(`сумма: ${revenue}`);
 
   return `• <b>${escapeHtml(projectName)}</b> — ${records.length} ${pluralOperations(
     records.length,
@@ -338,13 +370,11 @@ export function buildRevenueCatDailySummaryMessage(params: {
   records: RevenueCatSummaryRecord[];
 }): string {
   const { dateKey, records } = params;
-  const trialStarts = records.filter(isTrialStart).length;
-  const paidInitialPurchases = records.filter(
-    (record) => record.event.type?.toUpperCase() === 'INITIAL_PURCHASE' && !isTrialStart(record),
-  ).length;
-  const trialConversions = records.filter(
-    (record) =>
-      record.event.type?.toUpperCase() === 'RENEWAL' && record.event.is_trial_conversion === true,
+  const trialRecords = records.filter(isTrialStart);
+  const paidInitialPurchaseRecords = records.filter(isPaidInitialPurchase);
+  const renewalRecords = records.filter(isRenewal);
+  const trialConversions = renewalRecords.filter(
+    (record) => record.event.is_trial_conversion === true,
   ).length;
 
   const counts = new Map<string, number>();
@@ -364,14 +394,20 @@ export function buildRevenueCatDailySummaryMessage(params: {
   if (revenue) lines.push(`💵 <b>Сумма:</b> ${escapeHtml(revenue)}`);
 
   lines.push('');
-  lines.push(`💰 <b>Новые продажи:</b> ${paidInitialPurchases}`);
-  lines.push(`🎁 <b>Новые триалы:</b> ${trialStarts}`);
-
-  const renewalCount = counts.get('RENEWAL') || 0;
   lines.push(
-    `🔄 <b>Продления:</b> ${renewalCount}${
-      trialConversions ? ` (из них после триала: ${trialConversions})` : ''
-    }`,
+    `💰 <b>Новые продажи:</b> <b>${paidInitialPurchaseRecords.length}</b> — <b>${escapeHtml(
+      buildUsdAmountText(paidInitialPurchaseRecords),
+    )}</b>`,
+  );
+  lines.push(
+    `🎁 <b>Новые триалы:</b> <b>${trialRecords.length}</b> — <b>${escapeHtml(
+      buildUsdAmountText(trialRecords),
+    )}</b>`,
+  );
+  lines.push(
+    `🔄 <b>Продления:</b> <b>${renewalRecords.length}</b> — <b>${escapeHtml(
+      buildUsdAmountText(renewalRecords),
+    )}</b>${trialConversions ? ` (из них после триала: ${trialConversions})` : ''}`,
   );
   lines.push(`❌ <b>Отмены / возвраты:</b> ${counts.get('CANCELLATION') || 0}`);
   lines.push(`⚠️ <b>Проблемы с оплатой:</b> ${counts.get('BILLING_ISSUE') || 0}`);
