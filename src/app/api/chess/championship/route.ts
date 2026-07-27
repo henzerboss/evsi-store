@@ -147,9 +147,7 @@ function minCountryWinsForPeriod(periodType: PeriodType) {
 type Bucket = { count: number; resetAt: number };
 
 declare global {
-  // eslint-disable-next-line no-var
   var chessChampionshipBuckets: Map<string, Bucket> | undefined;
-  // eslint-disable-next-line no-var
   var chessChampionshipLastPodiumFinalizeAt: number | undefined;
 }
 

@@ -1,5 +1,34 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## QuitNic AI: Quit Vaping
+
+The production API route for the mobile app is:
+
+```text
+POST /api/gemini/quit-vape-coach
+```
+
+Configure `GEMINI_API_KEY_QUITVAPE` in production. For backwards-compatible
+deployments the route falls back to `GEMINI_API_KEY_QUITSMOKE`, then
+`GEMINI_API_KEY`. If `SERVER_CLIENT_TOKEN` is configured, it must match the
+mobile app's `X-Client-Token` header.
+
+The legal routes are available at
+`/{locale}/app/quitvape/privacy` and `/{locale}/app/quitvape/terms`.
+The RevenueCat webhook recognises the `quitvape` project key and supports the
+project-specific variables `REVENUECAT_WEBHOOK_AUTH_QUITVAPE`,
+`REVENUECAT_WEBHOOK_HMAC_SECRET_QUITVAPE`, and
+`TELEGRAM_CHAT_ID_RC_QUITVAPE`.
+
+Before deploying a database-backed build:
+
+```bash
+npm install
+npx prisma generate
+npx prisma migrate deploy
+npm run build
+```
+
 ## Getting Started
 
 First, run the development server:

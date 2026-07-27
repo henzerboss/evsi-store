@@ -1,11 +1,5 @@
 // file: src/lib/telegram.ts
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
-
-if (!TELEGRAM_BOT_TOKEN) {
-  throw new Error("TELEGRAM_BOT_TOKEN is not defined");
-}
-
 type TelegramMethod = 'sendMessage' | 'createInvoiceLink' | 'answerPreCheckoutQuery' | 'refundStarPayment' | "deleteMessage";
 
 interface TelegramResponse<T> {
@@ -34,7 +28,12 @@ type TelegramRequestParams = Record<string, string | number | boolean | object |
  * Базовая функция запроса к Telegram Bot API
  */
 export async function telegramRequest<T = unknown>(method: TelegramMethod, params: TelegramRequestParams): Promise<TelegramResponse<T>> {
-  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`, {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    throw new Error("TELEGRAM_BOT_TOKEN is not defined");
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),

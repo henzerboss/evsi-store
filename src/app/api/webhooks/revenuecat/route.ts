@@ -82,12 +82,8 @@ const PROJECTS_BY_KEY: Record<string, { name: string; emoji: string }> = {
   evsvpn: { name: 'evsVPN', emoji: '🛡️' },
   evpdf: { name: 'evPDF', emoji: '📄' },
 
-  // QuitNic AI, но технический ключ лучше оставить quitsmoke,
-  // чтобы потом отдельно добавить quitvape.
-  quitsmoke: { name: 'QuitNic AI', emoji: '🚭' },
-
-  // Будущее приложение для вейперов:
-  // quitvape: { name: 'QuitVape AI', emoji: '💨' },
+  quitsmoke: { name: 'QuitNic AI: Quit Smoking', emoji: '🚭' },
+  quitvape: { name: 'QuitNic AI: Quit Vaping', emoji: '💨' },
 
   chesspro: { name: 'Chess Pro', emoji: '♟️' },
 };
@@ -248,22 +244,6 @@ function getPriceText(event: RevenueCatEvent): string | null {
   return localPrice || usdPrice;
 }
 
-function formatDateTime(ms?: number | null): string | null {
-  if (typeof ms !== 'number' || Number.isNaN(ms)) {
-    return null;
-  }
-
-  try {
-    return new Intl.DateTimeFormat('ru-RU', {
-      dateStyle: 'short',
-      timeStyle: 'short',
-      timeZone: 'Europe/Madrid',
-    }).format(new Date(ms));
-  } catch {
-    return new Date(ms).toISOString();
-  }
-}
-
 function getProjectInfo(projectKey: string | null, event: RevenueCatEvent) {
   if (projectKey && PROJECTS_BY_KEY[projectKey]) {
     return PROJECTS_BY_KEY[projectKey];
@@ -284,12 +264,6 @@ function getStoreLabel(store?: string | null): string | null {
   return STORE_LABELS[store] || store;
 }
 
-function getReasonText(event: RevenueCatEvent): string | null {
-  if (event.cancel_reason) return event.cancel_reason;
-  if (event.expiration_reason) return event.expiration_reason;
-  return null;
-}
-
 function getExpectedAuth(projectKey: string | null): string | undefined {
   // Можно использовать общий секрет:
   // REVENUECAT_WEBHOOK_AUTH=...
@@ -299,6 +273,7 @@ function getExpectedAuth(projectKey: string | null): string | undefined {
   // REVENUECAT_WEBHOOK_AUTH_DISHKIN=...
   // REVENUECAT_WEBHOOK_AUTH_EVSVPN=...
   // REVENUECAT_WEBHOOK_AUTH_QUITSMOKE=...
+  // REVENUECAT_WEBHOOK_AUTH_QUITVAPE=...
   // REVENUECAT_WEBHOOK_AUTH_EVPDF=...
 
   if (projectKey) {
@@ -322,6 +297,7 @@ function getHmacSecret(projectKey: string | null): string | undefined {
   // REVENUECAT_WEBHOOK_HMAC_SECRET_CALORIECOUNTERAI=...
   // REVENUECAT_WEBHOOK_HMAC_SECRET_EVSVPN=...
   // REVENUECAT_WEBHOOK_HMAC_SECRET_QUITSMOKE=...
+  // REVENUECAT_WEBHOOK_HMAC_SECRET_QUITVAPE=...
   // REVENUECAT_WEBHOOK_HMAC_SECRET_EVPDF=...
 
   if (projectKey) {
@@ -340,6 +316,7 @@ function getTelegramChatId(projectKey: string | null): string | undefined {
   // TELEGRAM_CHAT_ID_RC_CALORIECOUNTERAI=...
   // TELEGRAM_CHAT_ID_RC_EVSVPN=...
   // TELEGRAM_CHAT_ID_RC_QUITSMOKE=...
+  // TELEGRAM_CHAT_ID_RC_QUITVAPE=...
   // TELEGRAM_CHAT_ID_RC_EVPDF=...
   //
   // Или общий чат:
