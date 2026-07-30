@@ -29,6 +29,28 @@ npx prisma migrate deploy
 npm run build
 ```
 
+## Shared lifetime Premium promo codes
+
+Mobile apps can validate a promo code with:
+
+```text
+POST /api/promocodes/validate
+Content-Type: application/json
+
+{"code":"FRIENDS2026"}
+```
+
+Configure the accepted codes as a comma-separated server environment variable:
+
+```text
+PREMIUM_PROMO_CODES=FRIENDS2026,PARTNER2026
+```
+
+The comparison is case-insensitive. The route does not write promo codes or
+activations to the database. A successful response returns the generic
+`premium` entitlement with `lifetime: true`, so the same route can be reused by
+multiple applications.
+
 ## Getting Started
 
 First, run the development server:
