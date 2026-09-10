@@ -1,5 +1,15 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## CalorieCounterAI limits
+
+`GET /api/calorie-counter/config` returns the four daily analysis quotas and
+the free-first-day flag from the site's environment. It uses the existing
+CalorieCounterAI `X-Client-Token` authentication. See
+[setup and API documentation](./CALORIE_COUNTER_CONFIG.md) and
+[example environment variables](./calorie-counter.env.example).
+Run `npm run test:calorie-config` to verify the route. Mobile integration
+requires the current app sources and is not included in this site archive.
+
 ## QuitNic AI: Quit Vaping
 
 The production API route for the mobile app is:

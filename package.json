@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "NODE_ENV=production next start -p 10000 -H 0.0.0.0",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:calorie-config": "node --test scripts/tests/calorie-counter-config.test.cjs"
   },
   "dependencies": {
     "@next/third-parties": "^15.4.4",
