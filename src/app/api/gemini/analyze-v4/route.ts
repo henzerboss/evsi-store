@@ -134,20 +134,20 @@ Units implied by keys:
 - mcg: chromium, iodine, molybdenum, selenium, vitaminA, biotin, folate, vitaminB12, vitaminD, vitaminK
 `;
 
-// Фото без еды (люди/животные): комплимент-сравнение с выпечкой. Выпечку выбираем
-// случайно на сервере — при temperature 0.2 модель иначе всегда отвечает одно и то же.
+// Фото людей/животных вместо еды: ласковое сравнение с милой выпечкой.
+// Выпечку выбираем случайно на сервере — при temperature 0.2 модель иначе повторяется.
 const COMPLIMENT_PASTRIES = [
-  'croissant', 'cinnamon roll', 'donut', 'cupcake', 'macaron', 'eclair', 'muffin', 'pretzel',
-  'cheesecake', 'waffle', 'pancake', 'brioche', 'profiterole', 'gingerbread cookie', 'churro',
-  'meringue', 'honey cake', 'apple strudel', 'cream puff', 'cookie', 'marshmallow pie', 'baguette',
+  'cinnamon roll', 'cupcake', 'donut', 'macaron', 'croissant', 'muffin',
+  'sweet bun', 'eclair', 'cream puff', 'cookie', 'pancake', 'profiterole',
 ];
 
 const buildNoFoodComplimentInstruction = (): string => {
   const pastry = COMPLIMENT_PASTRIES[Math.floor(Math.random() * COMPLIMENT_PASTRIES.length)];
   return [
-    `If there is no food but people or animals are visible, set name to a short playful compliment comparing them to a ${pastry}, tied to something visible (fur or hair color, outfit, pose, mood).`,
-    'If there are several, address all of them in plural with correct plural grammar and agreement.',
-    'Under 60 chars, about charm, never body shape or weight. Return components: [].',
+    'FIRST CHECK: if the main subject is people or animals, not a meal (bottles, drinks or snacks they hold or have nearby do not make it a meal), do not analyze food.',
+    `Instead set name to one short affectionate line addressed directly to them, comparing them to a cute ${pastry}, e.g. "You're as sweet as a ${pastry}!".`,
+    'Pick an adjective that matches their vibe (smiling, sunny, fluffy, sleepy...). Several subjects: address them all in plural with correct grammar.',
+    'Never label who they are or what they do (no "runners", "couple", "sporty"). Under 50 chars, never about body shape or weight. Return components: [].',
   ].join(' ');
 };
 
@@ -162,11 +162,11 @@ const buildPrompt = (input: AnalyzeInput, tier?: string, locale?: string | null)
 
   return [
     task,
+    input.kind === 'image' ? buildNoFoodComplimentInstruction() : '',
     'Identify 1-10 meaningful edible components. A homogeneous food is one component. Separate meaningful sides and sauces; combine tiny garnishes and seasonings. Do not split absorbed cooking oil unless it is visibly separate.',
     'For each component, weight_g is serving grams; all four nutrition values are per 100 g.',
     'Component weights must cover the whole edible meal. Prefer stated amounts or counts; otherwise estimate from visible scale, food density and a dish-specific typical portion. Exclude tableware and packaging. Round weights to the nearest 5 g.',
     'If food is identifiable, provide realistic numeric estimates. If it is not identifiable, return name: null and components: [].',
-    input.kind === 'image' ? buildNoFoodComplimentInstruction() : '',
     isPremium
       ? 'Also return nutrients_per_100g for the combined meal. Estimate every listed nutrient; use null only when genuinely impossible and 0 only when absent.'
       : '',
