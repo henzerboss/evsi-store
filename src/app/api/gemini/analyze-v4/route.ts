@@ -149,6 +149,9 @@ const buildPrompt = (input: AnalyzeInput, tier?: string, locale?: string | null)
     'For each component, weight_g is serving grams; all four nutrition values are per 100 g.',
     'Component weights must cover the whole edible meal. Prefer stated amounts or counts; otherwise estimate from visible scale, food density and a dish-specific typical portion. Exclude tableware and packaging. Round weights to the nearest 5 g.',
     'If food is identifiable, provide realistic numeric estimates. If it is not identifiable, return name: null and components: [].',
+    input.kind === 'image'
+      ? 'If there is no food but a person or an animal is visible, set name to a short playful compliment comparing them to a pastry (e.g. "Sweet as a cinnamon roll", "Cute little bun"; under 60 chars; about charm, never body shape or weight) and return components: [].'
+      : '',
     isPremium
       ? 'Also return nutrients_per_100g for the combined meal. Estimate every listed nutrient; use null only when genuinely impossible and 0 only when absent.'
       : '',
