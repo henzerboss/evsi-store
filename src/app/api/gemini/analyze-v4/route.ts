@@ -134,6 +134,23 @@ Units implied by keys:
 - mcg: chromium, iodine, molybdenum, selenium, vitaminA, biotin, folate, vitaminB12, vitaminD, vitaminK
 `;
 
+// Фото без еды (люди/животные): комплимент-сравнение с выпечкой. Выпечку выбираем
+// случайно на сервере — при temperature 0.2 модель иначе всегда отвечает одно и то же.
+const COMPLIMENT_PASTRIES = [
+  'croissant', 'cinnamon roll', 'donut', 'cupcake', 'macaron', 'eclair', 'muffin', 'pretzel',
+  'cheesecake', 'waffle', 'pancake', 'brioche', 'profiterole', 'gingerbread cookie', 'churro',
+  'meringue', 'honey cake', 'apple strudel', 'cream puff', 'cookie', 'marshmallow pie', 'baguette',
+];
+
+const buildNoFoodComplimentInstruction = (): string => {
+  const pastry = COMPLIMENT_PASTRIES[Math.floor(Math.random() * COMPLIMENT_PASTRIES.length)];
+  return [
+    `If there is no food but people or animals are visible, set name to a short playful compliment comparing them to a ${pastry}, tied to something visible (fur or hair color, outfit, pose, mood).`,
+    'If there are several, address all of them in plural with correct plural grammar and agreement.',
+    'Under 60 chars, about charm, never body shape or weight. Return components: [].',
+  ].join(' ');
+};
+
 const buildPrompt = (input: AnalyzeInput, tier?: string, locale?: string | null): string => {
   const isPremium = tier === 'premium';
   const task = input.kind === 'image'
@@ -149,9 +166,7 @@ const buildPrompt = (input: AnalyzeInput, tier?: string, locale?: string | null)
     'For each component, weight_g is serving grams; all four nutrition values are per 100 g.',
     'Component weights must cover the whole edible meal. Prefer stated amounts or counts; otherwise estimate from visible scale, food density and a dish-specific typical portion. Exclude tableware and packaging. Round weights to the nearest 5 g.',
     'If food is identifiable, provide realistic numeric estimates. If it is not identifiable, return name: null and components: [].',
-    input.kind === 'image'
-      ? 'If there is no food but a person or an animal is visible, set name to a short playful compliment comparing them to a pastry (e.g. "Sweet as a cinnamon roll", "Cute little bun"; under 60 chars; about charm, never body shape or weight) and return components: [].'
-      : '',
+    input.kind === 'image' ? buildNoFoodComplimentInstruction() : '',
     isPremium
       ? 'Also return nutrients_per_100g for the combined meal. Estimate every listed nutrient; use null only when genuinely impossible and 0 only when absent.'
       : '',
